@@ -1,0 +1,20 @@
+# Benchmarks
+SPY   # S&P 500
+IWM   # Russell 2000 (small caps)
+# Small/mid caps, mixed sectors, news-driven (starter list, edit freely)
+PLUG  # hydrogen
+SOFI  # fintech
+RKLB  # space
+IONQ  # quantum
+ACHR  # eVTOL
+LUNR  # space
+OKLO  # nuclear
+SOUN  # voice AI
+MARA  # bitcoin miner
+RIOT  # bitcoin miner
+CHPT  # EV charging
+UPST  # AI lending
+HIMS  # telehealth
+OPEN  # real estate tech
+BBAI  # defense AI
+SMR   # nuclear

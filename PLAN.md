@@ -1,0 +1,41 @@
+# Overreact: plan
+
+Thesis: humans overreact to news. Two charts per asset: **predicted price** (probability cone)
+and **theoretical price** (fair-value band). The gap between real and theoretical is the signal.
+Personal use, paper trading first, cost R$0 (local models, free data).
+
+## Decisions
+- Market: US small/mid caps (has open/close for the overnight test, free paper trading via Alpaca, many niche names).
+- Horizon: days to weeks.
+- Data: yfinance (prices), RSS: PR Newswire, Reddit, Yahoo per-ticker, SEC EDGAR 8-K. No X scraping (ToS, login, breaks weekly).
+- Storage: SQLite (`data/overreact.db`, not versioned).
+- Hardware: RX 7600 (8 GB) + 32 GB RAM -> small local LLM (3-8B quantized via Ollama/llama.cpp Vulkan), LightGBM on CPU.
+- The LLM never decides. It turns text into numbers; a quant model decides; fixed rules cap risk.
+
+## Decision pipeline
+1. Filter (Laya, fine-tuned): relevant or not. 2. Extract (local LLM -> JSON: ticker, sector, direction, intensity, confidence).
+3. Features per ticker/day: sentiment, news-volume spike, deviation from fair band, momentum, volume, gap.
+4. Decide (LightGBM): P(return over N days > costs). 5. Risk: position cap, stop, daily loss cap, kill switch.
+Labels for fine-tuning come for free: what the price did 1-3 days after each news item.
+
+## Phases
+| # | Deliverable | Gate |
+|---|---|---|
+| 1 | Prices + 24/7 news collector + overnight backtest | Data flowing daily (DONE except 24/7 scheduling) |
+| 2 | Fair-value band + "big deviation reverts?" backtest | Beats chance out of sample |
+| 3 | Local LLM extractor + auto-labels + Laya fine-tune | Beats chance on unseen news |
+| 4 | LightGBM decider + Lag-Llama cone + Alpaca paper trading + prediction journal | 3+ months beating IWM after costs |
+| 5 | Polished UI (Next.js + TradingView Lightweight Charts) | Can move earlier |
+| 6 | Small real money, hard limits | Only if phase 4 passes |
+
+## Phase 1 findings (2026-10-11, data since 2016)
+- Overnight (buy close, sell open) beats holding gross on every volatile small cap; intraday loses almost everything.
+- Break-even cost is only ~4-28 bps per side. At 10 bps most volatile names still profit; at 25 bps almost all lose.
+- Caveats before trusting it: survivorship bias (tickers picked today), yfinance "open" may be the first print rather
+  than the official opening auction, spreads on small caps at open are wide. Next: measure real fills with Alpaca paper
+  market-on-close / market-on-open orders.
+
+## Security checklist
+- No API keys in code; future Alpaca keys go in `.env` (gitignored), paper keys only until phase 6.
+- SEC_USER_AGENT from env, never hardcoded.
+- Real-money phase: hard caps enforced in code, not in config the model can change.
