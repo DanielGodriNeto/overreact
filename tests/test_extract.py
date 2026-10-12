@@ -1,4 +1,6 @@
-from overreact.extract import validate
+from unittest import mock
+
+from overreact.extract import throttle, validate
 
 KNOWN = {"PLUG", "SOFI"}
 
@@ -19,3 +21,9 @@ def test_unknown_ticker_and_bad_values_are_neutralized():
 def test_feed_ticker_is_fallback():
     assert validate({"ticker": "Plug Power"}, KNOWN, hint="PLUG")[0] == "PLUG"
     assert validate({"ticker": "SOFI"}, KNOWN, hint="PLUG")[0] == "SOFI"
+
+
+def test_throttle_pause_matches_duty():
+    with mock.patch("overreact.extract.time.sleep") as sleep:
+        throttle(2.0, 0.25)  # 2 s of work at 25% duty -> 6 s pause
+    sleep.assert_called_once_with(6.0)

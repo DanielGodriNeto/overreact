@@ -7,6 +7,8 @@ Model: OLLAMA_MODEL in .env (default qwen3:1.7b).
 import argparse
 import json
 import os
+import subprocess
+import time
 from datetime import datetime, timezone
 
 import requests
@@ -69,12 +71,26 @@ def ask(model: str, text: str, max_chars: int = 1500) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
+GAMES = ("RobloxPlayerBeta.exe",)
+DUTY_NORMAL, DUTY_GAMING = 0.6, 0.25  # share of time the GPU works; the rest is pause
+
+
+def gaming() -> bool:
+    out = subprocess.run(["tasklist", "/NH"], capture_output=True, text=True).stdout
+    return any(game in out for game in GAMES)
+
+
+def throttle(busy_seconds: float, duty: float) -> None:
+    """Sleep so that work / (work + pause) == duty."""
+    time.sleep(busy_seconds * (1 - duty) / duty)
+
+
 def model_name() -> str:
     load_env()
     return os.environ.get("OLLAMA_MODEL", "qwen3:1.7b")
 
 
-def run_filings(limit: int | None = None) -> int:
+def run_filings(limit: int | None = None, share_gpu: bool = False) -> int:
     """LLM over historical 8-K texts; the ticker is already known from the filing. Resumable."""
     model = model_name()
     conn = connect()
@@ -84,7 +100,10 @@ def run_filings(limit: int | None = None) -> int:
         "WHERE t.accession NOT IN (SELECT accession FROM filing_extractions) ORDER BY f.filed LIMIT ?",
         (limit or -1,)).fetchall()
     for accession, ticker, text in pending:
+        started = time.monotonic()
         _, direction, confidence, category = validate(ask(model, f"[{ticker}] {text}", 2500), {ticker}, ticker)
+        if share_gpu:
+            throttle(time.monotonic() - started, DUTY_GAMING if gaming() else DUTY_NORMAL)
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         conn.execute("INSERT OR REPLACE INTO filing_extractions VALUES (?,?,?,?,?,?)",
                      (accession, direction, confidence, category, model, now))
@@ -116,8 +135,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=200)
     ap.add_argument("--filings", action="store_true")
+    ap.add_argument("--share-gpu", action="store_true", help="pause between items; pause more while a game runs")
     args = ap.parse_args()
     if args.filings:
-        run_filings()
+        run_filings(share_gpu=args.share_gpu)
     else:
         run(args.limit)
