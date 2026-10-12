@@ -21,8 +21,8 @@ Labels for fine-tuning come for free: what the price did 1-3 days after each new
 ## Phases
 | # | Deliverable | Gate |
 |---|---|---|
-| 1 | Prices + 24/7 news collector + overnight backtest | Data flowing daily (DONE except 24/7 scheduling) |
-| 2 | Fair-value band + "big deviation reverts?" backtest | Beats chance out of sample |
+| 1 | Prices + 24/7 news collector + overnight backtest | Data flowing daily (DONE; collector = Windows task `overreact-news`, log in data/collector.log) |
+| 2 | Fair-value band + "big deviation reverts?" backtest | DONE: price-only reversion fails on small caps (see findings) |
 | 3 | Local LLM extractor + auto-labels + Laya fine-tune | Beats chance on unseen news |
 | 4 | LightGBM decider + TimesFM 2.5 cone (Lag-Llama as fallback) + Alpaca paper trading + prediction journal | 3+ months beating IWM after costs |
 | 5 | Polished UI (Next.js + TradingView Lightweight Charts) | Can move earlier |
@@ -34,6 +34,15 @@ Labels for fine-tuning come for free: what the price did 1-3 days after each new
 - Caveats before trusting it: survivorship bias (tickers picked today), yfinance "open" may be the first print rather
   than the official opening auction, spreads on small caps at open are wide. Next: measure real fills with Alpaca paper
   market-on-close / market-on-open orders.
+
+## Phase 2 findings (2026-10-12, `python -m overreact.fairvalue`)
+- Fair band = rolling mean of log price +/- 2 std; z = stretch. Train <2022, test >=2022, demeaned forward returns.
+- Small caps: NO reliable reversion. Panic (z<=-2) -> hit rate 43-47%, mean ~0. Euphoria (z>=2) -> ~55% small pullbacks
+  but rare huge continuations make the mean negative for a reversal trade: price-only, small caps trend (momentum).
+- SPY/IWM: weak reversion after panic (window 60, z<=-2.5: 64-68% hit at 5-10d, +0.3-0.5% net), few samples (113).
+- Only 2 parameter sets tried on purpose (more = data mining). Overlapping windows inflate n.
+- Conclusion: a stretched price alone does not say "overreaction". Key hypothesis for phase 3:
+  **stretch WITHOUT hard news reverts, stretch WITH hard news (8-K, earnings) continues.** News tells them apart.
 
 ## Security checklist
 - No API keys in code; future Alpaca keys go in `.env` (gitignored), paper keys only until phase 6.
