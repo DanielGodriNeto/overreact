@@ -24,7 +24,7 @@ Labels for fine-tuning come for free: what the price did 1-3 days after each new
 | 1 | Prices + 24/7 news collector + overnight backtest | Data flowing daily (DONE except 24/7 scheduling) |
 | 2 | Fair-value band + "big deviation reverts?" backtest | Beats chance out of sample |
 | 3 | Local LLM extractor + auto-labels + Laya fine-tune | Beats chance on unseen news |
-| 4 | LightGBM decider + Lag-Llama cone + Alpaca paper trading + prediction journal | 3+ months beating IWM after costs |
+| 4 | LightGBM decider + TimesFM 2.5 cone (Lag-Llama as fallback) + Alpaca paper trading + prediction journal | 3+ months beating IWM after costs |
 | 5 | Polished UI (Next.js + TradingView Lightweight Charts) | Can move earlier |
 | 6 | Small real money, hard limits | Only if phase 4 passes |
 
@@ -39,3 +39,9 @@ Labels for fine-tuning come for free: what the price did 1-3 days after each new
 - No API keys in code; future Alpaca keys go in `.env` (gitignored), paper keys only until phase 6.
 - SEC_USER_AGENT from env, never hardcoded.
 - Real-money phase: hard caps enforced in code, not in config the model can change.
+
+## TimesFM (checked 2026-10-12)
+- Use it for the **probability cone** (quantiles) and for forecasting volatility/volume, not for buy/sell direction.
+- Studies: zero-shot TimesFM/Chronos on daily returns ~ random walk (negative out-of-sample R², ~50% direction);
+  LightGBM/CatBoost beat them. So the decider stays LightGBM.
+- 2.5 is 200M params -> runs on CPU. Gate: its cone must be better calibrated (interval coverage) than a naive volatility cone.
