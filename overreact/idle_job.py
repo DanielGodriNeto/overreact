@@ -10,6 +10,7 @@ import sys
 from datetime import datetime
 
 from overreact import edgar, extract
+from overreact.db import DB_PATH
 
 ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
 
@@ -20,11 +21,13 @@ def keep_awake() -> None:
 
 
 def main() -> None:
+    if sys.stdout is None:  # started by pythonw from Task Scheduler: log to file
+        sys.stdout = sys.stderr = open(DB_PATH.parent / "idle_job.log", "a", buffering=1, encoding="utf-8")
     keep_awake()
     print(f"{datetime.now():%Y-%m-%d %H:%M} idle job start")
     edgar.update()
     edgar.fetch_texts()
-    extract.run_filings()
+    extract.run_filings(share_gpu=True)
     extract.run(limit=2000)
     print(f"{datetime.now():%Y-%m-%d %H:%M} idle job done")
 

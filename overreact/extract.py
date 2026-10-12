@@ -72,7 +72,7 @@ def ask(model: str, text: str, max_chars: int = 1500) -> dict:
 
 
 GAMES = ("RobloxPlayerBeta.exe",)
-DUTY_NORMAL, DUTY_GAMING = 0.6, 0.25  # share of time the GPU works; the rest is pause
+DUTY_NORMAL, DUTY_GAMING = 0.8, 0.8  # share of time the GPU works; the rest is pause
 
 
 def gaming() -> bool:
