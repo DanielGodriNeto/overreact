@@ -51,7 +51,9 @@ Labels for fine-tuning come for free: what the price did 1-3 days after each new
   enough; WHAT it says matters -> LLM over filing/news text.
 - `extract.py`: local LLM (qwen3:1.7b via Ollama, 7/8 on a tiny labeled set vs 5/8 for qwen3:4b, ~5 s/item on RX 7600)
   -> ticker, direction, confidence, category; output validated and clamped, unknown tickers dropped.
-- Next: fetch 8-K text for ~3,300 historical filings and run the LLM overnight (~5 h), then test
+- Idle batch (Windows task `overreact-idle`, log data/idle_job.log): starts after 10 min idle, keeps PC awake,
+  stops when user returns, resumes next idle. Fetches ~1,600 8-K texts (+EX-99 press releases) and runs the LLM.
+- Next, once the batch finishes: test
   "panic + LLM says neutral/positive news -> reverts" on 10 years; auto-labels for Laya fine-tune.
 
 ## Security checklist

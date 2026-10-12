@@ -1,6 +1,7 @@
 """Turn news text into numbers with a local LLM (Ollama). The LLM never decides trades.
 
-Usage: python -m overreact.extract [--limit 200]   (processes news not yet extracted)
+Usage: python -m overreact.extract [--limit 200]   (news not yet extracted)
+       python -m overreact.extract --filings      (SEC 8-K texts not yet extracted)
 Model: OLLAMA_MODEL in .env (default qwen3:1.7b).
 """
 import argparse
@@ -30,6 +31,14 @@ CREATE TABLE IF NOT EXISTS extractions (
     model      TEXT NOT NULL,
     extracted  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS filing_extractions (
+    accession  TEXT PRIMARY KEY REFERENCES filings(accession),
+    direction  INTEGER NOT NULL,
+    confidence REAL NOT NULL,
+    category   TEXT NOT NULL,
+    model      TEXT NOT NULL,
+    extracted  TEXT NOT NULL
+);
 """
 
 
@@ -47,9 +56,9 @@ def validate(raw: dict, known: set[str], hint: str | None = None) -> tuple[str |
     return ticker, direction, confidence, category
 
 
-def ask(model: str, text: str) -> dict:
-    resp = requests.post(OLLAMA_URL, timeout=120, json={
-        "model": model, "prompt": PROMPT.format(text=text[:1500]), "format": "json",
+def ask(model: str, text: str, max_chars: int = 1500) -> dict:
+    resp = requests.post(OLLAMA_URL, timeout=300, json={
+        "model": model, "prompt": PROMPT.format(text=text[:max_chars].replace('"', "'")), "format": "json",
         "stream": False, "think": False, "options": {"temperature": 0},
     })
     resp.raise_for_status()
@@ -60,9 +69,33 @@ def ask(model: str, text: str) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def run(limit: int) -> None:
+def model_name() -> str:
     load_env()
-    model = os.environ.get("OLLAMA_MODEL", "qwen3:1.7b")
+    return os.environ.get("OLLAMA_MODEL", "qwen3:1.7b")
+
+
+def run_filings(limit: int | None = None) -> int:
+    """LLM over historical 8-K texts; the ticker is already known from the filing. Resumable."""
+    model = model_name()
+    conn = connect()
+    conn.executescript(SCHEMA)
+    pending = conn.execute(
+        "SELECT t.accession, f.ticker, t.text FROM filing_texts t JOIN filings f USING (accession) "
+        "WHERE t.accession NOT IN (SELECT accession FROM filing_extractions) ORDER BY f.filed LIMIT ?",
+        (limit or -1,)).fetchall()
+    for accession, ticker, text in pending:
+        _, direction, confidence, category = validate(ask(model, f"[{ticker}] {text}", 2500), {ticker}, ticker)
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        conn.execute("INSERT OR REPLACE INTO filing_extractions VALUES (?,?,?,?,?,?)",
+                     (accession, direction, confidence, category, model, now))
+        conn.commit()
+    conn.close()
+    print(f"extracted {len(pending)} filings with {model}")
+    return len(pending)
+
+
+def run(limit: int) -> None:
+    model = model_name()
     conn = connect()
     conn.executescript(SCHEMA)
     known = {r[0] for r in conn.execute("SELECT DISTINCT ticker FROM prices")}
@@ -82,4 +115,9 @@ def run(limit: int) -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=200)
-    run(ap.parse_args().limit)
+    ap.add_argument("--filings", action="store_true")
+    args = ap.parse_args()
+    if args.filings:
+        run_filings()
+    else:
+        run(args.limit)
