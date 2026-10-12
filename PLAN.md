@@ -56,6 +56,17 @@ Labels for fine-tuning come for free: what the price did 1-3 days after each new
 - Next, once the batch finishes: test
   "panic + LLM says neutral/positive news -> reverts" on 10 years; auto-labels for Laya fine-tune.
 
+## Phase 3 event study (2026-10-12, `python -m overreact.hypothesis`, 1,511 8-K events 2016-2026)
+- Entry at close of the trading day AFTER filing; contrarian edge on demeaned forward returns.
+- "Dropped, LLM says news not bad": NO reversion (hit 40-44%, train and test).
+- "Jumped, LLM says news not good": test 2022+ reverts (cut 2: hit 57-61%, +2.6-2.9% at 5-10d, n=80) but train
+  2016-21 does not (hit ~50%, negative mean) -> promising, NOT confirmed.
+- Blocker: qwen3:1.7b reading is weak. Its direction barely matches the market reaction (mean z after "positive" -0.13
+  vs "negative" -0.26); 69% of filings labeled neutral, 67% "regulatory". The test is only as good as the reader.
+- Next options: (a) better reader (official qwen3:8b fits 8 GB VRAM, or 4b with thinking); (b) free rule features from
+  8-K item codes (2.02 earnings, 3.01 delisting notice, 3.02/424B dilution); (c) learn the "justified reaction" from
+  text (labels = actual next-day move), overreaction = actual - predicted. (c) is the theoretical-price idea done right.
+
 ## Security checklist
 - No API keys in code; future Alpaca keys go in `.env` (gitignored), paper keys only until phase 6.
 - SEC_USER_AGENT from env, never hardcoded.
