@@ -3,7 +3,7 @@
 Usage: python -m overreact.news            (one pass)
        python -m overreact.news --loop 900 (every 15 min, forever)
 
-SEC asks for a User-Agent with a contact: set SEC_USER_AGENT="name email" or EDGAR is skipped.
+SEC asks for a User-Agent with a contact: set SEC_USER_AGENT="name email" in .env or EDGAR is skipped.
 """
 import argparse
 import os
@@ -14,6 +14,7 @@ import feedparser
 import requests
 
 from overreact.db import connect
+from overreact.env import load_env
 from overreact.prices import load_tickers
 
 FEEDS = {
@@ -30,6 +31,7 @@ def all_feeds() -> dict[str, tuple[str, str]]:
     """source name -> (url, user agent)."""
     feeds = {name: (url, DEFAULT_UA) for name, url in FEEDS.items()}
     feeds |= {f"yahoo_{t}": (YAHOO_TICKER.format(t), DEFAULT_UA) for t in load_tickers()}
+    load_env()
     sec_ua = os.environ.get("SEC_USER_AGENT")
     if sec_ua:
         feeds["edgar_8k"] = (EDGAR_8K, sec_ua)

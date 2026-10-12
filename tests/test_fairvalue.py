@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from overreact.fairvalue import band, forward_return, reversion_table
+from overreact.fairvalue import band, forward_return, news_flag, reversion_table
 
 
 def test_band_uses_only_past_data():
@@ -18,6 +18,14 @@ def test_spike_gives_high_z_and_sits_above_upper():
     b = band(close, window=20).iloc[-1]
     assert b["z"] > 2
     assert 13.0 > b["upper"] > b["fair"] > b["lower"]
+
+
+def test_news_flag_window():
+    dates = pd.Index(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08"])
+    flag = news_flag(dates, pd.Series(["2024-01-03"]), lookback=2)
+    # flagged on filing day and the next trading day only
+    assert flag.tolist() == [False, True, True, False, False]
+    assert not news_flag(dates, pd.Series([], dtype=str)).any()
 
 
 def test_forward_return_looks_ahead_h_days():

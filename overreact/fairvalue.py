@@ -36,12 +36,25 @@ def forward_return(close: pd.Series, h: int) -> pd.Series:
     return close.shift(-h) / close - 1
 
 
-def signals(prices: pd.DataFrame, window: int) -> pd.DataFrame:
-    """One row per ticker/day: z and forward returns, demeaned per ticker so drift doesn't fake skill."""
+def news_flag(dates: pd.Index, filed: pd.Series, lookback: int = 3) -> np.ndarray:
+    """True on trading day i if a hard filing was filed within the last `lookback` trading days (incl. today).
+    ponytail: date-level, so a filing after today's close also flags today; use acceptance time if this matters."""
+    if filed.empty:
+        return np.zeros(len(dates), dtype=bool)
+    days = np.asarray(dates)
+    start = np.concatenate([days[:1].repeat(lookback - 1), days])[: len(days)]
+    filed = np.sort(filed.to_numpy())
+    return np.searchsorted(filed, days, side="right") > np.searchsorted(filed, start, side="left")
+
+
+def signals(prices: pd.DataFrame, window: int, filings: pd.DataFrame | None = None) -> pd.DataFrame:
+    """One row per ticker/day: z, hard-news flag and forward returns, demeaned per ticker."""
+    filings = filings if filings is not None else pd.DataFrame(columns=["ticker", "filed"])
     frames = []
     for ticker, g in prices.groupby("ticker"):
         close = g.set_index("date")["close"]
         df = pd.DataFrame({"ticker": ticker, "z": band(close, window)["z"]})
+        df["news"] = news_flag(close.index, filings.loc[filings["ticker"] == ticker, "filed"])
         for h in HORIZONS:
             fwd = forward_return(close, h)
             df[f"ex_{h}d"] = fwd - fwd.mean()
@@ -67,21 +80,34 @@ def reversion_table(sig: pd.DataFrame, cut: float, cost_bps: float) -> pd.DataFr
     return pd.DataFrame(rows).T.round(2)
 
 
-def load_prices() -> pd.DataFrame:
+def load() -> tuple[pd.DataFrame, pd.DataFrame]:
     conn = connect()
-    df = pd.read_sql("SELECT ticker, date, close FROM prices ORDER BY ticker, date", conn)
+    prices = pd.read_sql("SELECT ticker, date, close FROM prices ORDER BY ticker, date", conn)
+    try:
+        filings = pd.read_sql("SELECT ticker, filed FROM filings", conn)
+    except pd.errors.DatabaseError:  # edgar not run yet
+        filings = pd.DataFrame(columns=["ticker", "filed"])
     conn.close()
-    return df
+    return prices, filings
 
 
 def report(window: int, cut: float, split: str, cost_bps: float) -> None:
-    sig = signals(load_prices(), window)
+    prices, filings = load()
+    sig = signals(prices, window, filings)
     small = sig[~sig["ticker"].isin(BENCHMARKS)]
-    for label, part in (("TRAIN before " + split, small[small.index < split]),
-                        ("TEST from " + split, small[small.index >= split]),
-                        ("BENCHMARKS (SPY, IWM) all", sig[sig["ticker"].isin(BENCHMARKS)])):
+    parts = {
+        "TRAIN before " + split: small[small.index < split],
+        "TEST from " + split: small[small.index >= split],
+        "BENCHMARKS (SPY, IWM) all": sig[sig["ticker"].isin(BENCHMARKS)],
+    }
+    for label, part in parts.items():
         print(f"\n== {label} | window={window} cut={cut} cost={cost_bps}bps/side ==")
         print(reversion_table(part, cut, cost_bps).to_string())
+    for label in list(parts)[:2]:
+        part = parts[label]
+        for flag, name in ((False, "NO hard news"), (True, "WITH hard news (SEC filing in last 3 days)")):
+            print(f"\n== {label} | small caps, {name} ==")
+            print(reversion_table(part[part["news"] == flag], cut, cost_bps).to_string())
 
 
 if __name__ == "__main__":

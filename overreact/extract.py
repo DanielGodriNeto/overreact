@@ -1,0 +1,85 @@
+"""Turn news text into numbers with a local LLM (Ollama). The LLM never decides trades.
+
+Usage: python -m overreact.extract [--limit 200]   (processes news not yet extracted)
+Model: OLLAMA_MODEL in .env (default qwen3:1.7b).
+"""
+import argparse
+import json
+import os
+from datetime import datetime, timezone
+
+import requests
+
+from overreact.db import connect
+from overreact.env import load_env
+
+OLLAMA_URL = "http://localhost:11434/api/generate"
+CATEGORIES = {"offering", "earnings", "regulatory", "contract", "management", "listing", "other"}
+PROMPT = (
+    'You are a financial news classifier. Text: "{text}". Return JSON: {{"ticker": str or "" if none, '
+    '"direction": -1|0|1 (expected short-term stock impact), "confidence": 0-1, '
+    '"category": "offering|earnings|regulatory|contract|management|listing|other"}}'
+)
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS extractions (
+    link       TEXT PRIMARY KEY REFERENCES news(link),
+    ticker     TEXT,
+    direction  INTEGER NOT NULL,
+    confidence REAL NOT NULL,
+    category   TEXT NOT NULL,
+    model      TEXT NOT NULL,
+    extracted  TEXT NOT NULL
+);
+"""
+
+
+def validate(raw: dict, known: set[str], hint: str | None = None) -> tuple[str | None, int, float, str]:
+    """Clamp/clean LLM output; unknown tickers fall back to the feed's ticker (hint) or None."""
+    ticker = str(raw.get("ticker") or "").upper().strip().lstrip("$")
+    ticker = ticker if ticker in known else hint
+    try:
+        direction = max(-1, min(1, int(raw.get("direction", 0))))
+        confidence = max(0.0, min(1.0, float(raw.get("confidence", 0))))
+    except (TypeError, ValueError, OverflowError):
+        direction, confidence = 0, 0.0
+    category = raw.get("category")
+    category = category if isinstance(category, str) and category in CATEGORIES else "other"
+    return ticker, direction, confidence, category
+
+
+def ask(model: str, text: str) -> dict:
+    resp = requests.post(OLLAMA_URL, timeout=120, json={
+        "model": model, "prompt": PROMPT.format(text=text[:1500]), "format": "json",
+        "stream": False, "think": False, "options": {"temperature": 0},
+    })
+    resp.raise_for_status()
+    try:
+        parsed = json.loads(resp.json()["response"])
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def run(limit: int) -> None:
+    load_env()
+    model = os.environ.get("OLLAMA_MODEL", "qwen3:1.7b")
+    conn = connect()
+    conn.executescript(SCHEMA)
+    known = {r[0] for r in conn.execute("SELECT DISTINCT ticker FROM prices")}
+    pending = conn.execute(
+        "SELECT link, source, title, summary FROM news WHERE link NOT IN (SELECT link FROM extractions) "
+        "ORDER BY fetched DESC LIMIT ?", (limit,)).fetchall()
+    for link, source, title, summary in pending:
+        hint = source.removeprefix("yahoo_") if source.startswith("yahoo_") else None
+        values = validate(ask(model, f"{title}. {summary or ''}"), known, hint)
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        conn.execute("INSERT OR REPLACE INTO extractions VALUES (?,?,?,?,?,?,?)", (link, *values, model, now))
+        conn.commit()
+    print(f"extracted {len(pending)} items with {model}")
+    conn.close()
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--limit", type=int, default=200)
+    run(ap.parse_args().limit)

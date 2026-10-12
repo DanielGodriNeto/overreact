@@ -44,6 +44,16 @@ Labels for fine-tuning come for free: what the price did 1-3 days after each new
 - Conclusion: a stretched price alone does not say "overreaction". Key hypothesis for phase 3:
   **stretch WITHOUT hard news reverts, stretch WITH hard news (8-K, earnings) continues.** News tells them apart.
 
+## Phase 3 progress (2026-10-12)
+- `edgar.py`: 10 years of SEC hard filings (8-K, 10-Q/K, 424B offerings) for the universe, point-in-time.
+- Test "stretch WITHOUT filing reverts, WITH filing continues": NOT supported. Panic without filing still ~46% hit;
+  euphoria with filing flips sign between train (-6% at 5d) and test (+1.9%) = noise. Knowing a filing exists is not
+  enough; WHAT it says matters -> LLM over filing/news text.
+- `extract.py`: local LLM (qwen3:1.7b via Ollama, 7/8 on a tiny labeled set vs 5/8 for qwen3:4b, ~5 s/item on RX 7600)
+  -> ticker, direction, confidence, category; output validated and clamped, unknown tickers dropped.
+- Next: fetch 8-K text for ~3,300 historical filings and run the LLM overnight (~5 h), then test
+  "panic + LLM says neutral/positive news -> reverts" on 10 years; auto-labels for Laya fine-tune.
+
 ## Security checklist
 - No API keys in code; future Alpaca keys go in `.env` (gitignored), paper keys only until phase 6.
 - SEC_USER_AGENT from env, never hardcoded.
