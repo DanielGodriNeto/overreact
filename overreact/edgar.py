@@ -3,10 +3,12 @@
 8-K = material event (item codes say which: 2.02 earnings, 1.01 deal, 3.02 share sale...),
 10-Q/10-K = periodic reports, 424B* = share offerings (dilution).
 Usage: python -m overreact.edgar          filing list (needs SEC_USER_AGENT in .env)
+       python -m overreact.edgar --train  filing list for the training universe
        python -m overreact.edgar --texts  download 8-K text + press-release exhibits (resumable)
 """
 import argparse
 import html
+from pathlib import Path
 import os
 import re
 import time
@@ -15,7 +17,7 @@ import requests
 
 from overreact.db import connect
 from overreact.env import load_env
-from overreact.prices import load_tickers
+from overreact.prices import TICKERS_FILE, TRAIN_TICKERS_FILE, load_tickers
 
 TICKER_MAP = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS = "https://data.sec.gov/submissions/{}"
@@ -106,11 +108,11 @@ def fetch_texts(limit: int | None = None) -> int:
     return len(pending)
 
 
-def update() -> None:
+def update(tickers: Path = TICKERS_FILE) -> None:
     session, ciks = sec_session()
     conn = connect()
     conn.executescript(SCHEMA)
-    for ticker in load_tickers():
+    for ticker in load_tickers(tickers):
         if ticker not in ciks:
             print(f"{ticker}: no SEC CIK (ETF?), skipped")
             continue
@@ -127,7 +129,9 @@ def update() -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--texts", action="store_true")
-    if ap.parse_args().texts:
+    ap.add_argument("--train", action="store_true")
+    a = ap.parse_args()
+    if a.texts:
         fetch_texts()
     else:
-        update()
+        update(TRAIN_TICKERS_FILE if a.train else TICKERS_FILE)
