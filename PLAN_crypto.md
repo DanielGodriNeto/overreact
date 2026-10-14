@@ -39,6 +39,15 @@ R$0, no real money, orders only on Binance spot TESTNET. Length is above one pag
 Everything in the table is re-checked by `python -m overreact.crypto.probe` (P0) from the production machine, including
 robots.txt per host, so the plan does not rest on a different network path.
 
+**P0 results (2026-10-14, this PC):** all 17 endpoints 200, RTT ~300 ms to Binance/Bybit/OKX/Upbit, ~100 ms to RSS.
+- `api.binance.com/robots.txt` is `Disallow: /` for crawlers; it is the host of the official documented API, used within its
+  published rate limits (6000 weight/min), so kept. `status.coinbase.com` disallows `/api/` -> **Coinbase status dropped**;
+  Coinbase products diff (allowed) replaces it.
+- `exchangeInfo` has NO listing timestamp field -> t0 for the Binance diff source = first trade from the aggTrades dump.
+- Yesterday's 1s-kline `.CHECKSUM` already exists at 18:30 BRT -> dump lag is under ~1 day.
+- Clock (P1): offset +95.6 ms (stable within 2 ms over 10 bursts), RTT ~266 ms -> timestamp resolution +/- 133 ms.
+- Live pairs frozen in `crypto_pairs.txt` (BTC, ETH, SOL + top-volume XRP, BNB, DOGE, ZEC, NEAR, SUI, PEPE).
+
 ## Design decisions
 - New package `overreact/crypto/`, its own DB `data/crypto.db` (WAL). Reason: heavy writes must not share a lock or a
   VACUUM with the equity DB; `db.py`, `news.py`, `idle_job.py` stay untouched.
