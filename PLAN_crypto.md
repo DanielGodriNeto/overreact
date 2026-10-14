@@ -261,6 +261,19 @@ Everything is additive: new package, new DB file, new tasks. Rollback = `schtask
 `overreact.db` are never modified. Models/rules (P8) are versioned in `model_versions`/`rules_versions` with a `current`
 pointer; rollback = move the pointer.
 
+## P4b exploratory findings (2026-10-14, NOT gate evidence)
+
+Historical study (`python -m overreact.crypto.history`), 2025-10-01 onward, net of 20 bps, no spread:
+- Upbit KRW listing -> Binance spot: median +12.6% at 1 s, +21% at 3 s (n=15, placebo ~0). Capturable only at L=1 s
+  (+8% to 5 min); L>=3 s is zero or negative.
+- Upbit delisting: about -6% at 5 min, capturable short at L<=10 s, but needs perps. OKX/Bybit: small or none.
+
+Upbit ear latency budget (measured 2026-10-14): poll 10 s (mean wait 5 s) + Cloudflare `max-age=1` (0-1 s) + RTT
+30 ms cache hit / ~330 ms origin revalidate + order RTT to Binance ~270 ms. Today: ~6 s mean, ~10 s worst, which is
+past the 1-3 s window. Even 1 s polling gives ~1-2 s, borderline, at ~86k requests/day to an undocumented API.
+Still unmeasured: the gap between Upbit's published time and the item appearing in the API (needs live events,
+`python -m overreact.crypto.newsear --report`). Verdict: the Upbit listing edge is not reachable by polling.
+
 ## Open decisions for you
 1. Binance announcements: allow a read-only mainnet API key for the official push topic? (Default: NO, use exchangeInfo
    diff.) Note: without a push source the "300 ms" question cannot be answered, only the ear latency of polling.
