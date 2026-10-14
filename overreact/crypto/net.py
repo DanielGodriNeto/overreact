@@ -1,4 +1,6 @@
 """Polite outbound HTTP shared by the recorder and the news ear: throttle detection, safe Retry-After, backoff."""
+from urllib.parse import urlsplit
+
 import requests
 
 UA = "overreact-research/0.1 (personal, non-commercial)"
@@ -30,6 +32,23 @@ def next_delay(interval_s: float, fails: int, throttled: bool, retry_s: float | 
     if throttled:
         return 900.0 if fails >= 3 else max(retry_s or 0, 60.0 * 2 ** (fails - 1))
     return min(300.0, interval_s * 2 ** fails)
+
+
+def get_capped(url: str, cap: int, timeout: float = 60) -> bytes | None:
+    """GET a file with a hard size cap. None = 404 (file does not exist)."""
+    with requests.get(url, timeout=timeout, stream=True, headers={"User-Agent": UA}) as resp:
+        if urlsplit(resp.url)[:2] != urlsplit(url)[:2]:  # host pin survives redirects
+            raise ValueError(f"redirected off {urlsplit(url).netloc}")
+        raise_for_throttle(resp)
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        body = bytearray()
+        for chunk in resp.iter_content(1 << 20):
+            body += chunk
+            if len(body) > cap:
+                raise ValueError(f"{url} over {cap} bytes")
+    return bytes(body)
 
 
 def get_json(url: str, params: dict | None = None) -> list | dict:

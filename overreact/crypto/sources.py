@@ -35,7 +35,8 @@ def clean(text: str | None, cap: int = BODY_CAP) -> str:
 
 def bybit(js: dict) -> list[Item]:
     return [Item("bybit", a["url"], a["url"], clean(a["title"], 500), clean(a.get("description")), "en",
-                 a["type"]["key"], int(a["publishTime"]), "s") for a in js["result"]["list"]]
+                 "/".join([a["type"]["key"], *a.get("tags", [])]), int(a["publishTime"]), "s")
+            for a in js["result"]["list"]]
 
 
 def okx(js: dict) -> list[Item]:
