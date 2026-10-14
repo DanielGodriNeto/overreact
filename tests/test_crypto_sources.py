@@ -1,6 +1,7 @@
 from overreact.crypto import sources
 from overreact.crypto.coins import extract, load_aliases
-from overreact.crypto.newsear import insert_news, next_delay, usdt_bases
+from overreact.crypto.net import next_delay
+from overreact.crypto.newsear import insert_news, usdt_bases
 from overreact.crypto.store import connect
 
 BYBIT = {"result": {"list": [{"title": "New listing: XYZUSDT", "description": "<p>Spot</p>", "type": {"key": "new_crypto"},
@@ -22,7 +23,7 @@ def test_parsers_map_fields_and_timestamps():
     assert (o.src_ts_ms, o.src_ts_prec, o.ext_id) == (1790740812658, "ms", "okx-to-list-ct-usdt")  # pTime, not business
     u = sources.upbit(UPBIT)[0]
     assert (u.src_ts_ms, u.src_ts_prec, u.lang) == (1791961241000, "s", "ko")  # first_listed_at 07:00:41 UTC
-    r = sources.rss("cointelegraph", RSS)[0]
+    r = sources.rss("cointelegraph", RSS.encode())[0]
     assert (r.ext_id, r.src_ts_ms, r.body) == ("g1", 1792011382000, "Big & fast")
 
 
@@ -70,3 +71,11 @@ def test_backoff():
     assert next_delay(5, 1, True, 120) == 120
     assert next_delay(5, 2, True, None) == 120
     assert next_delay(5, 3, True, None) == 900
+
+
+def test_rss_never_fetches_a_url_body(monkeypatch):
+    import urllib.request
+    def boom(*a, **k):
+        raise AssertionError("feedparser tried to open a URL")
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", boom)
+    assert sources.rss("x", b"http://127.0.0.1:9/probe") == []

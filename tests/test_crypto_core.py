@@ -28,6 +28,10 @@ def test_log_never_contains_secret(tmp_path, monkeypatch):
     monkeypatch.setenv("BINANCE_TESTNET_API_SECRET", "s3cr3tvalue")
     log = logsafe.setup("t", tmp_path)
     log.info("sent key %s url /order?x=1&signature=abcdef123", "s3cr3tvalue")
+    try:
+        raise RuntimeError("bad key s3cr3tvalue")
+    except RuntimeError:
+        log.exception("crashed")
     for h in list(log.handlers):
         h.close()
         log.removeHandler(h)

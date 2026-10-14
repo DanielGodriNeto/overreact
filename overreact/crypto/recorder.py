@@ -22,6 +22,7 @@ import websockets
 from overreact.crypto import retention
 from overreact.crypto.clock import ExchangeClock, burst, local_ms
 from overreact.crypto.logsafe import setup
+from overreact.crypto.net import Throttled, get_json, next_delay
 from overreact.crypto.store import connect
 
 PAIRS_FILE = Path(__file__).resolve().parent.parent.parent / "crypto_pairs.txt"
@@ -104,12 +105,6 @@ def utc_day(ms: float) -> str:
 def spread_stats(values: array) -> tuple[float, float]:
     s = sorted(values)
     return s[len(s) // 2], s[int(0.9 * (len(s) - 1))]
-
-
-def get_json(url: str, params: dict | None = None) -> list | dict:
-    resp = requests.get(url, params=params, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
 
 
 class Recorder:
@@ -256,26 +251,33 @@ class Recorder:
             last = self.clock.now_ms()
 
     async def rest_loop(self) -> None:
-        tick = 0
+        tick = fails = 0
         while True:
             started = time.monotonic()
+            throttled, retry_s = False, None
             try:
                 await self.rest_tick(tick)
-            except requests.HTTPError as err:
-                self.log.warning("rest: %s", err)
-                if err.response is not None and err.response.status_code in (418, 429):
-                    await asyncio.sleep(int(err.response.headers.get("Retry-After", 60)))
-            except (requests.RequestException, ValueError, KeyError) as err:
+                fails = 0
+            except Throttled as err:
+                fails, throttled, retry_s = fails + 1, True, err.retry_after
+                self.log.warning("rest throttled (%s), fail %d", err, fails)
+            except (requests.RequestException, ValueError, KeyError, TypeError) as err:
+                fails += 1
                 self.log.warning("rest: %s", err)
             tick += 1
-            await asyncio.sleep(max(0.0, 5 - (time.monotonic() - started)))
+            delay = next_delay(5, fails, throttled, retry_s)
+            await asyncio.sleep(max(0.0, delay - (time.monotonic() - started)))
 
     async def rest_tick(self, tick: int) -> None:
         """Every 5 s top of book for live pairs; every minute clock + all-pair spreads; every 5 min open interest."""
         now = self.clock.now_ms()
         books = await asyncio.to_thread(get_json, f"{SPOT_REST}/ticker/bookTicker",
                                         {"symbols": json.dumps(self.pairs, separators=(",", ":"))})
-        self.buf["spread_5s"].extend((b["symbol"], now // 1000, num(b["bidPrice"]), num(b["askPrice"])) for b in books)
+        for b in books:
+            try:
+                self.buf["spread_5s"].append((b["symbol"], now // 1000, num(b["bidPrice"]), num(b["askPrice"])))
+            except (KeyError, TypeError, ValueError):
+                self.bad += 1
         if tick % 12 == 0:
             offset, rtt = await asyncio.to_thread(burst, requests.Session())
             self.clock.add(offset)
@@ -310,9 +312,12 @@ class Recorder:
             if time.monotonic() - last_rollup > 3600:
                 last_rollup = time.monotonic()
                 now_s = self.clock.now_ms() // 1000
-                with self.conn:
-                    retention.rollup(self.conn, now_s - 3600)  # an hour of slack for late REST backfill
-                    retention.prune(self.conn, now_s)
+                try:
+                    with self.conn:
+                        retention.rollup(self.conn, now_s - 3600)  # an hour of slack for late REST backfill
+                        retention.prune(self.conn, now_s)
+                except sqlite3.Error as err:
+                    self.log.error("retention failed, retry next hour: %s", err)
 
     def flush(self) -> None:
         """One transaction per 5 s; buffers are kept (retried next flush) if the write fails."""
@@ -323,7 +328,7 @@ class Recorder:
                         self.conn.executemany(SQL[table], rows)
                 info = json.dumps({"bad": self.bad, "watched": len(self.watched)})
                 self.conn.execute("INSERT OR REPLACE INTO heartbeat VALUES ('rec', ?, ?)", (self.clock.now_ms(), info))
-        except sqlite3.OperationalError as err:
+        except sqlite3.Error as err:
             self.log.error("flush failed, keeping %d rows: %s", sum(map(len, self.buf.values())), err)
             return
         for rows in self.buf.values():

@@ -5,6 +5,7 @@ Timestamp precision (verified 2026-10-14): OKX pTime is real ms; Bybit publishTi
 """
 import calendar
 import html
+import io
 import re
 from datetime import datetime
 from typing import NamedTuple
@@ -53,9 +54,10 @@ def upbit(js: dict) -> list[Item]:
     return items
 
 
-def rss(source: str, text: str) -> list[Item]:
+def rss(source: str, body: bytes) -> list[Item]:
+    """body as bytes in a stream: given a str, feedparser would fetch it if it looks like a URL or path (SSRF)."""
     items = []
-    for e in feedparser.parse(text).entries:
+    for e in feedparser.parse(io.BytesIO(body)).entries:
         stamp = e.get("published_parsed")
         ts = calendar.timegm(stamp) * 1000 if stamp else None
         items.append(Item(source, e.get("id") or e.get("link", ""), e.get("link", ""), clean(e.get("title"), 500),

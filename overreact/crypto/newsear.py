@@ -8,6 +8,7 @@ Usage: python -m overreact.crypto.newsear            (loop, runs forever)
 import argparse
 import hashlib
 import json
+import os
 import sqlite3
 import statistics
 import time
@@ -16,14 +17,15 @@ from typing import Callable, NamedTuple
 import requests
 
 from overreact.crypto import sources
+from overreact.crypto.net import UA, Throttled, next_delay, raise_for_throttle
 from overreact.crypto.clock import ExchangeClock, burst
 from overreact.crypto.coins import extract, load_aliases
 from overreact.crypto.logsafe import clip, setup
 from overreact.crypto.store import DB_PATH, connect
 
 STATE_DIR = DB_PATH.parent
-UA = "overreact-research/0.1 (personal, non-commercial)"
 MAX_BYTES = 2_000_000
+DEADLINE_S = 20  # whole-response deadline; requests timeouts are per read
 SKEW_MS = 500  # receive earlier than publication by more than clock resolution = source clock is off
 WATCH_MS = 15 * 60_000  # ask the recorder for bid/ask on a mentioned coin for 15 min (+10 min tail there)
 DOWN_GAP_MS = 60_000
@@ -34,12 +36,12 @@ class Source(NamedTuple):
     params: dict | None
     interval_s: float
     parse: Callable  # body -> list[Item], or -> dict state for kind "diff"
-    kind: str = "json"  # json | text | diff
+    kind: str = "json"  # json | xml | diff
     max_bytes: int = MAX_BYTES
 
 
 def rss(name: str, url: str) -> Source:
-    return Source(url, None, 60, lambda text: sources.rss(name, text), "text")
+    return Source(url, None, 60, lambda body: sources.rss(name, body), "xml")
 
 
 SOURCES = {
@@ -58,21 +60,6 @@ SOURCES = {
 }
 
 
-class Throttled(Exception):
-    def __init__(self, status: int, retry_after: float | None):
-        super().__init__(f"HTTP {status}")
-        self.retry_after = retry_after
-
-
-def next_delay(interval_s: float, fails: int, throttled: bool, retry_after: float | None) -> float:
-    """Seconds until the next poll. 3 throttles in a row pause the source 15 min; never hammer a source."""
-    if fails == 0:
-        return interval_s
-    if throttled:
-        return 900.0 if fails >= 3 else max(retry_after or 0, 60.0 * 2 ** (fails - 1))
-    return min(300.0, interval_s * 2 ** fails)
-
-
 def fetch(http: requests.Session, src: Source, validators: dict) -> bytes | None:
     """GET with size cap and ETag/Last-Modified. None = not modified."""
     headers = {"User-Agent": UA}
@@ -81,17 +68,17 @@ def fetch(http: requests.Session, src: Source, validators: dict) -> bytes | None
     if validators.get("modified"):
         headers["If-Modified-Since"] = validators["modified"]
     with http.get(src.url, params=src.params, headers=headers, timeout=5, stream=True) as resp:
-        if resp.status_code in (403, 418, 429):
-            retry = resp.headers.get("Retry-After")
-            raise Throttled(resp.status_code, float(retry) if retry and retry.isdigit() else None)
+        raise_for_throttle(resp)
         if resp.status_code == 304:
             return None
         resp.raise_for_status()
-        body = b""
+        body, started = b"", time.monotonic()
         for chunk in resp.iter_content(65_536):
             body += chunk
             if len(body) > src.max_bytes:
                 raise ValueError(f"response over {src.max_bytes} bytes")
+            if time.monotonic() - started > DEADLINE_S:
+                raise ValueError(f"response slower than {DEADLINE_S} s")
         validators.update(etag=resp.headers.get("ETag"), modified=resp.headers.get("Last-Modified"))
     return body
 
@@ -141,38 +128,53 @@ class Ear:
     @staticmethod
     def load_state(name: str) -> dict | None:
         path = STATE_DIR / f"crypto_state_{name}.json"
-        return json.loads(path.read_text()) if path.exists() else None
+        try:
+            return json.loads(path.read_text())
+        except (OSError, ValueError):  # missing or corrupt file = no baseline; never crash-loop on it
+            return None
 
-    def items_for(self, name: str, src: Source, body: bytes) -> list[sources.Item]:
-        if src.kind == "text":
-            return src.parse(body.decode("utf-8", "replace"))
+    def save_state(self, name: str, state: dict) -> None:
+        """Atomic: a kill mid-write leaves the previous file intact."""
+        path = STATE_DIR / f"crypto_state_{name}.json"
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state))
+        os.replace(tmp, path)
+        self.state[name] = state
+        if name == "binance_symbols":
+            self.bases = usdt_bases(state)
+
+    def items_for(self, name: str, src: Source, body: bytes) -> tuple[list[sources.Item], dict | None]:
+        """Items to store, plus the new diff baseline (saved only after the items are stored)."""
+        if src.kind == "xml":
+            return src.parse(body), None  # bytes, never str: feedparser treats a str as a URL or path to open
         parsed = src.parse(json.loads(body))
         if src.kind != "diff":
-            return parsed
-        old, self.state[name] = self.state[name], parsed
-        (STATE_DIR / f"crypto_state_{name}.json").write_text(json.dumps(parsed))
-        if name == "binance_symbols":
-            self.bases = usdt_bases(parsed)
-        return [] if old is None else sources.symbol_diff(name, old, parsed)  # first run ever = baseline only
+            return parsed, None
+        old = self.state[name]
+        return ([] if old is None else sources.symbol_diff(name, old, parsed)), parsed  # first run = baseline
 
     def poll(self, name: str) -> None:
         src = SOURCES[name]
-        throttled, retry_after = False, None
+        throttled, retry_s = False, None
+        validators = dict(self.validators[name])
         try:
-            body = fetch(self.http, src, self.validators[name])
+            body = fetch(self.http, src, validators)
             recv_ms = self.clock.now_ms()
-            items = [] if body is None else self.items_for(name, src, body)
+            items, new_state = ([], None) if body is None else self.items_for(name, src, body)
             self.store(items, recv_ms, backlog=name in self.unpolled)
+            if new_state is not None:
+                self.save_state(name, new_state)
+            self.validators[name] = validators  # only now: a failed store must not turn the next poll into a 304
             self.unpolled.discard(name)
             self.fails[name] = 0
         except Throttled as err:
             self.fails[name] += 1
-            throttled, retry_after = True, err.retry_after
+            throttled, retry_s = True, err.retry_after
             self.log.warning("%s throttled (%s), fail %d", name, err, self.fails[name])
-        except (requests.RequestException, ValueError, KeyError, TypeError) as err:
+        except (requests.RequestException, ValueError, KeyError, TypeError, OSError, sqlite3.Error) as err:
             self.fails[name] += 1
             self.log.warning("%s failed: %s", name, clip(str(err)))
-        self.next_at[name] = time.monotonic() + next_delay(src.interval_s, self.fails[name], throttled, retry_after)
+        self.next_at[name] = time.monotonic() + next_delay(src.interval_s, self.fails[name], throttled, retry_s)
 
     def store(self, items: list[sources.Item], recv_ms: int, backlog: bool) -> None:
         with self.conn:
@@ -187,7 +189,7 @@ class Ear:
                     self.conn.executemany("INSERT OR IGNORE INTO watch VALUES (?,?,?,?)",
                                           [(f"{c}USDT", recv_ms, recv_ms + WATCH_MS, f"news {news_id}")
                                            for c in coins if c in self.bases])
-                    self.log.info("NEW %s [%s] %s coins=%s", item.source, item.src_cat, clip(item.title, 120),
+                    self.log.info("NEW %s [%s] %s coins=%s", item.source, clip(item.src_cat, 40), clip(item.title, 120),
                                   ",".join(coins))
 
     def mark_downtime(self) -> None:

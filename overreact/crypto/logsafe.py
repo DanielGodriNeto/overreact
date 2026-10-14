@@ -21,7 +21,11 @@ def clip(text: str, n: int = 200) -> str:
 
 class Redact(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        msg = SIGNATURE.sub(r"\1***", record.getMessage())
+        msg = record.getMessage()
+        if record.exc_info:  # tracebacks are formatted after filters run: fold them in here so they get redacted too
+            msg += "\n" + logging.Formatter().formatException(record.exc_info)
+            record.exc_info, record.exc_text = None, None
+        msg = SIGNATURE.sub(r"\1***", msg)
         for name, value in os.environ.items():
             if SECRET_NAME.search(name) and len(value) >= 6:
                 msg = msg.replace(value, "***")
