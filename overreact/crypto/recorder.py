@@ -6,10 +6,12 @@ Usage: python -m overreact.crypto.recorder [--rotate-after 82800] [--force-recon
 """
 import argparse
 import asyncio
+import ctypes
 import json
 import math
 import random
 import sqlite3
+import sys
 import time
 from array import array
 from collections import deque
@@ -35,6 +37,7 @@ WATCH_TAIL_MS = 600_000  # keep streaming bid/ask 10 min after a watch window en
 MAX_WATCHED = 50
 SLEEP_GAP_MS = 10_000  # wall-clock jump between 1 s ticks = PC slept or process froze
 BACKFILL_MAX_S = 1000  # REST 1s klines per request
+ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
 SQL = {
     "bars_1s": "INSERT OR REPLACE INTO bars_1s VALUES (?,?,?,?,?,?,?,?)",
     "bars_rest": "INSERT OR IGNORE INTO bars_1s VALUES (?,?,?,?,?,?,?,?)",  # backfill never overwrites live bars
@@ -354,12 +357,20 @@ async def run(rotate_after: float, force_reconnect_after: float | None) -> None:
     await asyncio.gather(*tasks)
 
 
+def keep_awake() -> None:
+    """Ask Windows not to sleep while this process lives (screen may still turn off). Same as idle_job.keep_awake,
+    copied to keep pandas/yfinance out of this 24/7 process. Stopping the task releases it."""
+    if sys.platform == "win32":
+        ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rotate-after", type=float, default=23 * 3600, help="seconds before replacing a connection")
     ap.add_argument("--force-reconnect-after", type=float, help="test hook: drop the spot connection once")
     a = ap.parse_args()
     log = setup("rec")
+    keep_awake()
     while True:  # never die under the scheduler: log, wait, start over
         try:
             asyncio.run(run(a.rotate_after, a.force_reconnect_after))
