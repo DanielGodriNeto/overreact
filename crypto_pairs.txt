@@ -1,0 +1,11 @@
+# Live-recorded Binance spot pairs (3 majors + top USDT volume on 2026-10-14). Everything else comes from dumps.
+BTCUSDT
+ETHUSDT
+SOLUSDT
+XRPUSDT
+BNBUSDT
+DOGEUSDT
+ZECUSDT
+NEARUSDT
+SUIUSDT
+PEPEUSDT
