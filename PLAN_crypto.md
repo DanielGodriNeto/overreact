@@ -47,6 +47,17 @@ robots.txt per host, so the plan does not rest on a different network path.
 - Yesterday's 1s-kline `.CHECKSUM` already exists at 18:30 BRT -> dump lag is under ~1 day.
 - Clock (P1): offset +95.6 ms (stable within 2 ms over 10 bursts), RTT ~266 ms -> timestamp resolution +/- 133 ms.
 - Live pairs frozen in `crypto_pairs.txt` (BTC, ETH, SOL + top-volume XRP, BNB, DOGE, ZEC, NEAR, SUI, PEPE).
+- **Bybit `publishTime` is ms-typed but always ends in 000 = second precision.** Only OKX `pTime` is truly ms-precise.
+  Stored as `src_ts_prec = s`. See the dated amendment to H1 below.
+- Futures WS: only the new `/market/stream?streams=` path delivers data; the old `/stream` path connects and stays silent.
+- Full `exchangeInfo` is 6.7 MB raw / 145 KB gzip -> polled every 60 s (~200 MB/day download); Coinbase products uses ETag.
+
+**P2/P3 build notes (2026-10-14):** recorder live tests: forced reconnect and forced rotation (spot + futures) with
+0 missing traded BTC seconds after REST backfill; a killed process is detected at next start from the last heartbeat
+(`gaps` cause `down`, 205 s refilled). Coverage is measured against REST traded seconds (`status`), because even BTC
+has ~7% of seconds without trades. News ear: 7 sources produce rows on the first poll (all `backlog`), 0 failures;
+the 2 diff sources start from a saved baseline (`data/crypto_state_*.json`). Not built (YAGNI until P4 needs them):
+cross-source `dup_of`, flagging of >20% 1 s jumps, the `events`/`reactions` tables and the event-window retention pin.
 
 ## Design decisions
 - New package `overreact/crypto/`, its own DB `data/crypto.db` (WAL). Reason: heavy writes must not share a lock or a
@@ -141,6 +152,8 @@ spread_evt, trades, model_versions) to `data/backup/`, keep 7.
 Only these three hypotheses can open the GO gate; everything else in the reports is labelled exploratory.
 - **H1** Bybit/OKX new-spot-listing announcements (ms-precise t0) for coins with a Binance USDT pair: abnormal return
   from t0+L to t0+5 min is > 0 after costs, with L = 1 s (primary) and 3 s (secondary, not gate-bearing).
+  *Amendment 2026-10-14 (before any data, reason: P0 found Bybit timestamps are second precision):* L = 1 s applies to
+  OKX only; Bybit events enter H1 at L = 3 s, with t0 = publishTime (true publication lies in [t0, t0 + 1 s)).
 - **H2** Upbit KRW listing notices (second precision, so L = 10 s only) for coins with a Binance USDT pair: abnormal
   return from t0+10 s to t0+5 min > 0 after costs.
 - **H3** Liquidation cascades (long-side, on recorded perps): price return from cascade end (first 60 s without a qualifying
