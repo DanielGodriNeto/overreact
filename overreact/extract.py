@@ -76,7 +76,8 @@ DUTY_NORMAL, DUTY_GAMING = 0.8, 0.8  # share of time the GPU works; the rest is 
 
 
 def gaming() -> bool:
-    out = subprocess.run(["tasklist", "/NH"], capture_output=True, text=True).stdout
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # pythonw has no console: don't flash one
+    out = subprocess.run(["tasklist", "/NH"], capture_output=True, text=True, creationflags=no_window).stdout
     return any(game in out for game in GAMES)
 
 
