@@ -1,4 +1,5 @@
 import math
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -37,3 +38,9 @@ def test_period_labels_split_confirmation_exploration_live():
 
 def test_universe_is_frozen():
     assert lab.universe() == lab.FROZEN.read_text().split() and len(lab.universe()) == 30
+
+
+def test_month_days_stop_before_end_and_at_month_edge():
+    end = datetime(2026, 10, 4, tzinfo=timezone.utc).timestamp()
+    assert lab.month_days("2026-10", end) == ["2026-10-01", "2026-10-02", "2026-10-03"]
+    assert lab.month_days("2026-09", end)[-1] == "2026-09-30"

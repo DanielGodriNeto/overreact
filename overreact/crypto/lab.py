@@ -52,10 +52,22 @@ def months(start: float, end: float) -> list[str]:
     return out
 
 
+def month_days(month: str, end: float) -> list[str]:
+    d, last = date.fromisoformat(f"{month}-01"), datetime.fromtimestamp(end, timezone.utc).date()
+    out = []
+    while d.strftime("%Y-%m") == month and d < last:
+        out.append(d.isoformat())
+        d += timedelta(days=1)
+    return out
+
+
 def spot_1m(sym: str, start: float, end: float) -> tuple[np.ndarray, np.ndarray]:
     ts, cl = [], []
     for m in months(start, end):
         bars = dumps.month_bars(sym, "1m", m)
+        if bars is None:  # month not closed yet: monthly dump unpublished, use the daily ones (review finding)
+            bars = [b for day in month_days(m, end) for b in dumps.day_bars(sym, day, "1m") or []]
+            print(f"  {sym} {m}: no monthly dump, {len(bars)} bars from daily dumps", flush=True)
         if bars:
             ts.append(np.array([b[0] for b in bars], dtype=np.int64))
             cl.append(np.array([b[1] for b in bars]))

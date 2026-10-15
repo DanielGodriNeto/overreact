@@ -358,3 +358,23 @@ python -m overreact.crypto.lab cascade --since 2026-10-15
 - Sai em `data/lab_cascade_live.csv` com o rótulo `LIVE`.
 - Critério: o mesmo da secundária (+240 min, limite inferior do IC > 0), avaliado só quando houver ≥ 30 dias
   com sinal.
+
+**Revisão independente do código do lab (2026-10-15):**
+
+Sem viés de antecipação. A revisão conferiu:
+- a janela de 15 min, só com candles fechados;
+- o OI, só com snapshot ≤ t;
+- a entrada no fechamento do candle de t+60;
+- os preenchimentos do `sim`;
+- as threads do ouvido;
+- a verificação dos downloads.
+
+Achado médio, **corrigido**: o `--since` dependia do arquivo mensal, que só sai quando o mês fecha. Sem o fallback,
+o mês corrente sumia em silêncio. Agora ele usa os arquivos diários de 1 min e avisa no log.
+
+Ressalvas baixas, registradas e não corrigidas:
+- depois de um buraco nos dados, "15 min antes" pode ser um candle mais antigo (as 30 moedas são líquidas, então
+  é raro);
+- o placebo não exclui janelas de evento (contaminação leve, que puxa o placebo *a favor* do evento; ou seja,
+  conservador);
+- no G3, a saída é medida a partir de t0 e não de t0+L (diferença ≤ 15 s em 5 min, sem efeito no veredito).

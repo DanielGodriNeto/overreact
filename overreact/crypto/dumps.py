@@ -76,8 +76,8 @@ def csv_text(rel: str) -> str | None:
     return read_zip(path.read_bytes(), name.removesuffix(".zip") + ".csv")
 
 
-def day_bars(sym: str, day: str) -> list[Bar] | None:
-    text = csv_text(f"spot/daily/klines/{sym}/1s/{sym}-1s-{day}.zip")
+def day_bars(sym: str, day: str, interval: str = "1s") -> list[Bar] | None:
+    text = csv_text(f"spot/daily/klines/{sym}/{interval}/{sym}-{interval}-{day}.zip")
     return None if text is None else parse_csv(text)
 
 
