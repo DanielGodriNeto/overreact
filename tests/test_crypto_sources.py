@@ -79,3 +79,25 @@ def test_rss_never_fetches_a_url_body(monkeypatch):
         raise AssertionError("feedparser tried to open a URL")
     monkeypatch.setattr(urllib.request.OpenerDirector, "open", boom)
     assert sources.rss("x", b"http://127.0.0.1:9/probe") == []
+
+
+def test_slow_source_does_not_delay_the_others(monkeypatch, tmp_path):
+    import logging
+    import time
+
+    from overreact.crypto import newsear
+
+    def fake_fetch(http, src, validators):
+        if src is newsear.SOURCES["bybit"]:
+            time.sleep(1.0)  # a read timeout on one host
+        return None  # 304: nothing new
+
+    monkeypatch.setattr(newsear, "fetch", fake_fetch)
+    ear = newsear.Ear(connect(tmp_path / "c.db"), logging.getLogger("test"), None)
+    started = time.monotonic()
+    while time.monotonic() - started < 0.3:
+        ear.step()
+        time.sleep(0.01)
+    assert set(ear.inflight) == {"bybit"}  # still waiting on the slow one
+    assert all(ear.next_at[n] > started for n in newsear.SOURCES if n != "bybit")  # every other source already polled
+    ear.pool.shutdown(wait=True)

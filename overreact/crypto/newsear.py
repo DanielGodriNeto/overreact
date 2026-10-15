@@ -12,6 +12,8 @@ import os
 import sqlite3
 import statistics
 import time
+from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Callable, NamedTuple
 
 import requests
@@ -124,6 +126,13 @@ class Ear:
         self.state = {name: self.load_state(name) for name, s in SOURCES.items() if s.kind == "diff"}
         self.bases = usdt_bases(self.state.get("binance_symbols") or {})
         self.aliases = load_aliases()
+        # one worker per source: a slow or timing-out source never delays the others (D1 in LAB_crypto.md)
+        self.pool = ThreadPoolExecutor(max_workers=len(SOURCES) + 1)
+        self.sessions = {name: requests.Session() for name in SOURCES}  # a Session is not thread-safe
+        self.inflight: dict[str, tuple[Future, dict]] = {}
+        self.clock_job: Future | None = None
+        self.last_clock = time.monotonic()
+        self.lateness = {name: deque(maxlen=200) for name in SOURCES}  # start - due, seconds
 
     @staticmethod
     def load_state(name: str) -> dict | None:
@@ -153,13 +162,22 @@ class Ear:
         old = self.state[name]
         return ([] if old is None else sources.symbol_diff(name, old, parsed)), parsed  # first run = baseline
 
-    def poll(self, name: str) -> None:
+    def fetch_job(self, name: str, validators: dict) -> tuple[bytes | None, int]:
+        body = fetch(self.sessions[name], SOURCES[name], validators)
+        return body, self.clock.now_ms()  # stamped when the bytes arrive, not when the main loop gets to them
+
+    def submit(self, name: str) -> None:
+        if self.next_at[name]:  # 0.0 = first poll after start, nothing was due yet
+            self.lateness[name].append(time.monotonic() - self.next_at[name])
+        validators = dict(self.validators[name])
+        self.inflight[name] = (self.pool.submit(self.fetch_job, name, validators), validators)
+
+    def finish(self, name: str, job: Future, validators: dict) -> None:
+        """Main thread only: parse, store and schedule. SQLite and the ear's state are never touched by workers."""
         src = SOURCES[name]
         throttled, retry_s = False, None
-        validators = dict(self.validators[name])
         try:
-            body = fetch(self.http, src, validators)
-            recv_ms = self.clock.now_ms()
+            body, recv_ms = job.result()
             items, new_state = ([], None) if body is None else self.items_for(name, src, body)
             self.store(items, recv_ms, backlog=name in self.unpolled)
             if new_state is not None:
@@ -202,22 +220,37 @@ class Ear:
     def run(self) -> None:
         self.clock.add(burst(self.http)[0])
         self.mark_downtime()
-        last_clock = last_beat = time.monotonic()
+        last_beat = time.monotonic()
         while True:
-            for name in [n for n, t in self.next_at.items() if t <= time.monotonic()]:
-                self.poll(name)
-            if time.monotonic() - last_clock > 60:
-                last_clock = time.monotonic()
-                try:
-                    self.clock.add(burst(self.http)[0])
-                except (requests.RequestException, ValueError, KeyError) as err:
-                    self.log.warning("clock: %s", err)
+            self.step()
             if time.monotonic() - last_beat > 5:
                 last_beat = time.monotonic()
                 with self.conn:
                     self.conn.execute("INSERT OR REPLACE INTO heartbeat VALUES ('news', ?, ?)",
-                                      (self.clock.now_ms(), json.dumps({"fails": {k: v for k, v in self.fails.items() if v}})))
-            time.sleep(0.2)
+                                      (self.clock.now_ms(), json.dumps({"fails": {k: v for k, v in self.fails.items() if v},
+                                                                 "late_p95_s": self.late_p95()})))
+            time.sleep(0.05)
+
+    def late_p95(self) -> dict[str, float]:
+        return {n: round(sorted(xs)[int(0.95 * len(xs))], 3) for n, xs in self.lateness.items() if len(xs) >= 2}
+
+    def step(self) -> None:
+        """Start due fetches, finish completed ones, keep the clock fresh. Never blocks on the network."""
+        now = time.monotonic()
+        for name, due in self.next_at.items():
+            if due <= now and name not in self.inflight:
+                self.submit(name)
+        for name in [n for n, (job, _) in self.inflight.items() if job.done()]:
+            self.finish(name, *self.inflight.pop(name))
+        if self.clock_job is None and now - self.last_clock > 60:
+            self.last_clock = now
+            self.clock_job = self.pool.submit(burst, self.http)
+        if self.clock_job is not None and self.clock_job.done():
+            job, self.clock_job = self.clock_job, None
+            try:
+                self.clock.add(job.result()[0])
+            except (requests.RequestException, ValueError, KeyError) as err:
+                self.log.warning("clock: %s", err)
 
 
 def report(conn: sqlite3.Connection) -> None:
