@@ -101,3 +101,18 @@ def test_slow_source_does_not_delay_the_others(monkeypatch, tmp_path):
     assert set(ear.inflight) == {"bybit"}  # still waiting on the slow one
     assert all(ear.next_at[n] > started for n in newsear.SOURCES if n != "bybit")  # every other source already polled
     ear.pool.shutdown(wait=True)
+
+
+def test_extract_g1_audit_cases():
+    bases = {"MEGA", "TRUMP", "ULTI", "GEAR", "VRA", "ELON"}
+    assert extract("OKX to list MEGA (MegaETH) for spot trading", bases, {}) == {"MEGA": 0.95}
+    assert extract("New Listing: TRUMP/USDT", bases, {})["TRUMP"] == 1.0  # stop word, but an explicit pair
+    assert "TRUMP" not in extract("Trump says TRUMP is great", bases, {})  # bare stop word stays out
+    assert set(extract("OKX to delist ULTI, GEAR, VRA and ELON spot trading pairs", bases, {})) == {"ULTI", "GEAR", "VRA", "ELON"}
+
+
+def test_upbit_market_list_is_not_a_coin():
+    bases = {"PROS", "BTC", "GTC", "EUL", "PLUME"}
+    assert extract("파로스(PROS) 신규 거래지원 안내 (KRW, BTC, USDT 마켓)", bases, {}) == {"PROS": 1.0}
+    assert extract("깃코인(GTC) KRW, USDT 마켓 디지털 자산 추가", bases, {}) == {"GTC": 1.0}
+    assert set(extract("오일러(EUL), 플룸(PLUME) 신규 거래지원 안내 (BTC, USDT 마켓)", bases, {})) == {"EUL", "PLUME"}

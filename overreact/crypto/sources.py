@@ -36,7 +36,7 @@ def clean(text: str | None, cap: int = BODY_CAP) -> str:
 def bybit(js: dict) -> list[Item]:
     return [Item("bybit", a["url"], a["url"], clean(a["title"], 500), clean(a.get("description")), "en",
                  "/".join([a["type"]["key"], *a.get("tags", [])]), int(a["publishTime"]), "s")
-            for a in js["result"]["list"]]
+            for a in js["result"]["list"] if "publishTime" in a]  # items before ~2024-03 carry only event dates
 
 
 def okx(js: dict) -> list[Item]:

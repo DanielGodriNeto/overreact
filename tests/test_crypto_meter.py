@@ -64,3 +64,12 @@ def test_news_type():
     assert news_type("깃코인(GTC) KRW, USDT 마켓 디지털 자산 추가") == "listing"
     assert news_type("블라스트(BLAST) 거래지원 종료 안내") == "delisting"
     assert news_type("Maintenance notice") is None
+
+
+def test_news_type_g1_audit_cases():
+    assert news_type("베니스토큰(VVV) 신규 거래지원 안내 (KRW, BTC, USDT 마켓)") == "listing"
+    assert news_type("OKX will launch WCT/USDT for spot trading") == "listing"
+    assert news_type("Announcement from OKX regarding the delay of USDG (Global Dollar) listing") is None
+    assert news_type("OKX to postpone delisting of ZK margin trading pair and perpetual futures") is None
+    assert news_type("🔥 Listing of MOVE on Convert") is None
+    assert news_type("썬더코어(TT) 출금 중단(종료) 및 거래지원 종료 예정일 변경 안내 (09/01 09:00 ~)") is None

@@ -162,3 +162,54 @@ para a janela de 1–3 s da Upbit, mas é atraso de graça que saiu do caminho.
 
 Testes em `tests/test_crypto_sim.py`: preço pessimista, sem look-ahead, vazamento antes do carimbo.
 45 testes passando.
+
+### Calibração antes do D2: quando o preço anda em relação ao carimbo da Upbit (2026-10-15)
+
+**Raciocínio:** se o preço começasse a subir antes do carimbo (vazamento) ou se o carimbo viesse atrasado,
+consultar mais rápido não ajudaria.
+
+**Medição** (`sim.onset`), nas 15 listagens do período de exploração: o primeiro segundo com o preço ≥ 2%
+acima do preço de 2 min antes cai **em 0 s (10 casos) ou +1 s (5 casos)**. Nenhuma alta antes do carimbo.
+(Os -67/-46 s que aparecem com o limiar de 1% são ruído.)
+
+**Conclusão:** o carimbo da Upbit é preciso e o mercado reage **dentro do próprio segundo da publicação**.
+Quem ganha isso tem o anúncio em < 1 s.
+
+**Evidência extra (2026-10-15):** paginar o histórico a 1 página/s, e depois a 3 s/página, levou **HTTP 429**
+da Upbit, e o ouvido ao vivo (mesmo IP) levou um 429 junto. Com 10 s/página, o bloqueio vem depois de ~10
+páginas. Ou seja: o limite da API é baixo e compartilhado por IP. Consultar a cada 1–2 s seria bloqueado.
+
+### G1: precisão do classificador (2026-10-15), CORRIGIDO
+
+**Método:**
+- Amostra estratificada de 120 títulos (40 por fonte; 14 listagem, 14 deslistagem e 12 "nenhum" previstos).
+- Julgados por mim só pelo texto, sem olhar o preço.
+- Depois da correção, **amostra nova** de 90 títulos (sem repetir), com as regras novas.
+
+| | Antes (n=120) | Depois (amostra nova, n=90) |
+|---|---|---|
+| Precisão "listagem" | 40/42 = 95% | 30/30 |
+| Precisão "deslistagem" | 40/42 = 95% | 30/30 |
+| Listagens perdidas entre os "nenhum" | **10 de 36** (7 Upbit, 3 OKX) | 0 de 30 (Wilson 95%: ≤ 11%) |
+| Moeda certa extraída (OKX) | 4 de 12 listagens; 0 de 9 deslistagens com nome | corrigido (ver testes) |
+
+**Erros achados e corrigidos:**
+1. Upbit "신규 거래지원 안내" ("novo suporte de negociação") **é listagem**, e o formato novo da Upbit não era
+   reconhecido. Isso também quer dizer que **o estudo P4b contou listagens da Upbit a menos**.
+2. OKX "will launch X/USDT for spot trading" é listagem.
+3. Falsos positivos: "delay of ... listing", "postpone delisting", "Listing of X on Convert" e "예정일 변경"
+   (mudança de data) agora dão "nenhum".
+4. Moedas perdidas:
+   - "MEGA (MegaETH)" (formato da OKX);
+   - listas "delist A, B and C" (agora aceito ticker sem marcação em título de corretora);
+   - "TRUMP/USDT" (TRUMP estava na lista de palavras ignoradas por causa do presidente; um par explícito agora
+     vence).
+5. **Regressão pega na segunda amostra:** "(KRW, BTC, USDT 마켓)" fazia BTC virar moeda do evento em 5 de 10
+   listagens da Upbit. A lista de mercados agora é removida antes de extrair.
+
+**Ainda não coberto** (raro, registrado):
+- tickers de 1 letra (J, W, K);
+- prefixos "1000000X" da Bybit;
+- a categoria "유의 종목 지정" (aviso de risco da Upbit, possível evento negativo; precisaria de short).
+
+Testes: `test_news_type_g1_audit_cases`, `test_extract_g1_audit_cases`, `test_upbit_market_list_is_not_a_coin`.

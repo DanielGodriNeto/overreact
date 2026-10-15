@@ -22,7 +22,9 @@ from overreact.crypto.newsear import Ear, insert_news
 from overreact.crypto.store import connect
 
 DELISTING = re.compile(r"delist|거래지원 종료", re.I)
-LISTING = re.compile(r"\b(will list|to list|listing|lists|list)\b|디지털 자산 추가", re.I)
+LISTING = re.compile(r"\b(will list|to list|listing|lists|list|relisting)\b|launch \S+ for spot trading|"
+                     r"디지털 자산 추가|신규 거래지원", re.I)
+NOT_EVENT = re.compile(r"\b(delay|postpone)|on convert|예정일 변경", re.I)  # updates to an earlier notice (G1 audit)
 DERIV = re.compile(r"perpetual|futures|derivatives|margin", re.I)
 COST_BPS = 20  # round trip at ~0.1% taker per side; spread NOT included (no history) -> results are optimistic
 WINDOW_S = (-600, 3600)
@@ -42,23 +44,25 @@ PAGERS = {  # name -> (url, params for a page, parser)
 
 
 def news_type(title: str) -> str | None:
+    if NOT_EVENT.search(title):
+        return None
     if DELISTING.search(title):  # first: "delisting" contains "listing"
         return "delisting"
     return "listing" if LISTING.search(title) else None
 
 
-def fetch_history(conn, since_ms: int) -> None:
+def fetch_history(conn, since_ms: int, pause_s: float = 1.0, first_page: int = 1) -> None:
     """Page back until items are older than since. Stored as backlog (we did not receive them live)."""
     for name, (url, params, parse) in PAGERS.items():
         n = 0
-        for page in range(1, 300):
+        for page in range(first_page, 300):  # resume deep paging: Upbit 429s after ~10 pages per window
             batch = parse(get_json(url, params(page)))
             with conn:
                 for item in batch:
                     n += insert_news(conn, item, int(time.time() * 1000), 0.0, backlog=True) is not None
             if not batch or min(i.src_ts_ms for i in batch) < since_ms:
                 break
-            time.sleep(1)  # polite
+            time.sleep(pause_s)  # polite (Upbit answered 429 at 1 req/s, 2026-10-15)
         print(f"{name}: {n} new items")
 
 
@@ -72,7 +76,7 @@ def events(conn, since_ms: int, until_ms: int, bases: set[str]) -> pd.DataFrame:
             continue
         market = "deriv" if DERIV.search(f"{title} {cat}") else "spot"
         for coin, conf in extract(title, bases, {}).items():
-            if conf >= 0.9:  # explicit mentions only: (XYZ), XYZ/USDT, $XYZ
+            if conf >= 0.6:  # templated exchange titles: bare tickers in "delist A, B and C" are real (G1 audit)
                 out.append({"news_id": news_id, "source": source, "kind": kind, "market": market, "coin": coin,
                             "t0_ms": t0_ms, "title": title[:80]})
     return pd.DataFrame(out)
@@ -82,15 +86,19 @@ def utc_day(t_s: float) -> str:
     return datetime.fromtimestamp(t_s, timezone.utc).date().isoformat()
 
 
-def window(sym: str, t0: float) -> tuple[list[int], list[float]] | None:
-    start, end = t0 + WINDOW_S[0], t0 + WINDOW_S[1]
+def bars_window(sym: str, start: float, end: float) -> list[dumps.Bar] | None:
     bars = []
     for day in sorted({utc_day(start), utc_day(end)}):
         day_bars = dumps.day_bars(sym, day)
         if day_bars is None:
             return None
         bars += [b for b in day_bars if start <= b[0] <= end]
-    return [b[0] for b in bars], [b[1] for b in bars]
+    return bars
+
+
+def window(sym: str, t0: float) -> tuple[list[int], list[float]] | None:
+    bars = bars_window(sym, t0 + WINDOW_S[0], t0 + WINDOW_S[1])
+    return None if bars is None else ([b[0] for b in bars], [b[1] for b in bars])
 
 
 def measure(sym: str, t0: float) -> dict[int, float] | str:

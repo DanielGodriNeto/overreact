@@ -11,8 +11,9 @@ HORIZONS_S = (1, 3, 10, 30, 60, 300, 900, 3600)
 PRE_S = (-60, -10)
 
 
-def price_at(ts: list[int], closes: list[float], t: float) -> float | None:
-    i = bisect.bisect_right(ts, t - 1) - 1
+def price_at(ts: list[int], closes: list[float], t: float, width: int = 1) -> float | None:
+    """Close of the last bar (width seconds long) that had closed by time t."""
+    i = bisect.bisect_right(ts, t - width) - 1
     return closes[i] if i >= 0 else None
 
 
