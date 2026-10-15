@@ -1,10 +1,10 @@
 """Lab experiments G4 (liquidation-cascade rebound) and G5 (negative funding), with the rules pre-registered in
 LAB_crypto.md. Spot long only, 1m closes + slippage + taker fees, CI by bootstrap clustered on the UTC day.
 
-Universe: the recorder pairs + the 20 biggest Binance perps (24h quote volume today) that have a spot USDT pair
-and were listed before 2024-01-01. Picking by today's volume is survivorship bias (dead coins are missing);
-it is recorded as a caveat, not fixed.
-Usage: python -m overreact.crypto.lab cascade|funding|upbit
+Universe: the recorder pairs + the 20 biggest Binance perps (24h quote volume on 2026-10-15) that have a spot
+USDT pair and were listed before 2024-01-01, frozen in lab_universe.txt for the live confirmation. Picking by
+volume is survivorship bias (dead coins are missing); it is recorded as a caveat, not fixed.
+Usage: python -m overreact.crypto.lab cascade|funding|upbit [--since 2026-10-15]
 """
 import argparse
 import math
@@ -25,11 +25,15 @@ from overreact.crypto.store import connect
 FEE, SLIP = 0.001, 0.001  # per side; slippage pre-registered at 0.1% for non-listing events
 CONF_END = datetime(2025, 10, 1, tzinfo=timezone.utc).timestamp()  # before: confirmation, after: exploration
 START = datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp()
+LIVE_START = datetime(2026, 10, 15, tzinfo=timezone.utc).timestamp()  # rules frozen: second confirmation
+FROZEN = Path(__file__).with_name("lab_universe.txt")
 PAIRS = Path(__file__).resolve().parents[2] / "crypto_pairs.txt"
 OUT = dumps.CACHE.parent
 
 
 def universe(extra: int = 20) -> list[str]:
+    if FROZEN.exists():
+        return FROZEN.read_text().split()
     base = [s.strip() for s in PAIRS.read_text().splitlines() if s.strip() and not s.startswith("#")]
     spot = {v.split("|")[1] + "USDT" for v in (Ear.load_state("binance_symbols") or {}).values()
             if v.startswith("TRADING|") and v.endswith("|USDT")}
@@ -136,8 +140,13 @@ def evaluate(sym: str, ts: np.ndarray, cl: np.ndarray, events: list[float], lags
     return rows
 
 
+def period(t: pd.Series) -> np.ndarray:
+    return np.select([t < CONF_END, t < LIVE_START], ["CONFIRMATION 2024-01..2025-09", "EXPLORATION 2025-10.."],
+                     "LIVE 2026-10-15..")
+
+
 def summarize(df: pd.DataFrame, title: str) -> str:
-    df = df.assign(period=np.where(df["t"] < CONF_END, "CONFIRMATION 2024-01..2025-09", "EXPLORATION 2025-10.."),
+    df = df.assign(period=period(df["t"]),
                    day=pd.to_datetime(df["t"], unit="s").dt.date)
     lines = [f"\n== {title}"]
     for (period, lag, h), g in df[~df["placebo"]].groupby(["period", "lag", "h"]):
@@ -193,7 +202,7 @@ def upbit(end: float) -> None:
         rows.append(row)
     df = pd.DataFrame(rows)
     df.to_csv(OUT / "lab_upbit.csv", index=False)
-    df["period"] = np.where(df["t"] < CONF_END, "CONFIRMATION 2024-01..2025-09", "EXPLORATION 2025-10..")
+    df["period"] = period(df["t"])
     for period, g in df.groupby("period"):
         print(f"\n== Upbit listings {period}: n={len(g)} events, {g['news_id'].nunique()} notices")
         for col in [c for c in df.columns if c.startswith(("L", "poll"))]:
@@ -204,7 +213,7 @@ def upbit(end: float) -> None:
             print(f"  {col:12} net {mean:8.1f} bps  CI [{lo:8.1f}, {hi:8.1f}]  hit {(x > 0).mean():.0%}  n={len(x)}")
 
 
-def run(kind: str) -> None:
+def run(kind: str, since: float = START) -> None:
     end = datetime.combine(date.today() - timedelta(days=3), datetime.min.time(), timezone.utc).timestamp()
     if kind == "upbit":
         upbit(end)
@@ -212,22 +221,24 @@ def run(kind: str) -> None:
     syms, rng, rows = universe(), random.Random(0), []
     print("universe:", " ".join(syms))
     for sym in syms:
-        ts, cl = spot_1m(sym, START, end)
+        ts, cl = spot_1m(sym, since, end)
         if not len(ts):
             continue
         if kind == "cascade":
             ev = cascade_events(sym, ts, cl)
             rows += evaluate(sym, ts, cl, ev, (60, 300, 900), (3600, 4 * 3600), rng)
         else:
-            ev = funding_events(sym, START, end, 72 * 3600)
+            ev = funding_events(sym, since, end, 72 * 3600)
             rows += evaluate(sym, ts, cl, ev, (60, 300), (24 * 3600, 72 * 3600), rng)
         print(f"  {sym}: {len(ev)} events", flush=True)
     df = pd.DataFrame(rows)
-    df.to_csv(OUT / f"lab_{kind}.csv", index=False)
+    df.to_csv(OUT / f"lab_{kind}{'_live' if since >= LIVE_START else ''}.csv", index=False)
     print(summarize(df, kind))
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("kind", choices=["cascade", "funding", "upbit"])
-    run(ap.parse_args().kind)
+    ap.add_argument("--since", help="UTC date; reruns the frozen rules on new data only (live confirmation)")
+    a = ap.parse_args()
+    run(a.kind, datetime.fromisoformat(a.since).replace(tzinfo=timezone.utc).timestamp() if a.since else START)

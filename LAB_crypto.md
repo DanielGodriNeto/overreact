@@ -346,3 +346,15 @@ Na EXPLORAÇÃO (n = 49), tudo foi negativo e significativo: −580 bps em L = 1
 cada minuto) que registra cada sinal e o resultado em +240 min. Pelo pré-registro, os dados depois de
 2026-10-15 são a segunda confirmação. Com ~4 dias de sinal por mês, ter n ≥ 30 dias leva ~6–8 meses.
 Nada de dinheiro real antes disso.
+
+**Confirmação ao vivo, como rodar** (regras e universo congelados em 2026-10-15,
+`overreact/crypto/lab_universe.txt`):
+```
+python -m overreact.crypto.lab cascade --since 2026-10-15
+```
+- Rodar todo começo de mês, depois que o data.binance.vision publica o arquivo mensal de 1 min.
+- É **o mesmo código do backtest** aplicado só aos dias novos, então não existe um detector "ao vivo"
+  diferente do que foi testado.
+- Sai em `data/lab_cascade_live.csv` com o rótulo `LIVE`.
+- Critério: o mesmo da secundária (+240 min, limite inferior do IC > 0), avaliado só quando houver ≥ 30 dias
+  com sinal.

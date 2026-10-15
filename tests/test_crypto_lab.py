@@ -1,6 +1,7 @@
 import math
 
 import numpy as np
+import pandas as pd
 
 from overreact.crypto import lab
 
@@ -27,3 +28,12 @@ def test_net_uses_only_closed_bars_and_costs():
     r = lab.net(ts, cl, 60, 180)  # buy at the close known at 60 (bar 0), sell at 180 (bar 120)
     assert math.isclose(r, math.log(12 * 0.999 * 0.999 / (10 * 1.001 * 1.001)))
     assert lab.net(ts, cl, 30, 180) is None  # no bar closed yet
+
+
+def test_period_labels_split_confirmation_exploration_live():
+    t = pd.Series([lab.CONF_END - 1, lab.CONF_END, lab.LIVE_START])
+    assert [p.split()[0] for p in lab.period(t)] == ["CONFIRMATION", "EXPLORATION", "LIVE"]
+
+
+def test_universe_is_frozen():
+    assert lab.universe() == lab.FROZEN.read_text().split() and len(lab.universe()) == 30
