@@ -282,3 +282,67 @@ Na EXPLORAÇÃO (n = 49), tudo foi negativo e significativo: −580 bps em L = 1
 4. **Hipótese nova, só exploração e NÃO testável no nosso cenário:** a reversão de +5 s para +5 min (cerca de
    −3 a −5%) seria um short, e short/derivativos estão provavelmente vetados para o usuário no Brasil. Fica
    registrada e não é perseguida.
+
+### G4: rebote depois de cascata de liquidação (2026-10-15), APROVADO NA SECUNDÁRIA (com ressalvas)
+
+**Hipótese:**
+- uma queda forte com o open interest caindo ao mesmo tempo = liquidações forçadas, não informação nova;
+- vendedor forçado vende abaixo do valor justo e o preço tende a voltar (sobrerreação);
+- não depende de velocidade de notícia: a entrada é 1 min depois, então o atraso de segundos não importa.
+
+**Dados:**
+- 30 moedas: 10 do recorder + 20 maiores perps de hoje com spot USDT e listadas antes de 2024;
+- candles de 1 min do spot; OI de 5 min das métricas diárias, só snapshots com carimbo ≤ t;
+- custos de 0,1% de taxa + 0,1% de slippage por lado;
+- IC bootstrap por **dia**, porque cascatas atingem várias moedas juntas.
+
+| CONFIRMAÇÃO 2024-01..2025-09 (n=293, 91 dias) | líquido médio | IC 95% | mediana | acerto | placebo |
+|---|---|---|---|---|---|
+| **Primária:** entra +1 min, sai +60 min | +16 bps | [−82, +113] | +37 | 55% | −40 |
+| **Secundária:** entra +1 min, sai +240 min | **+136 bps** | **[+28, +229]** | +99 | 63% | −41 |
+| Sensibilidade: entra +5 min, sai +240 min | +154 | [+36, +255] | | 63% | |
+| Sensibilidade: entra +15 min, sai +240 min | +106 | [−28, +239] | | 58% | |
+
+- O placebo (mesma moeda, mesmo horizonte, horário aleatório) dá −40 bps, que é exatamente o custo. Ou seja,
+  bruto ≈ 0 fora das cascatas.
+- Na EXPLORAÇÃO (2025-10.., n = 169): +60 min = +307 bps [+85, +557]; +240 min = +355 [+51, +726].
+
+**Veredito pré-registrado:**
+- primária **REPROVADA**;
+- secundária **APROVADA** (limite inferior > 0 com α = 0,025).
+
+**Robustez da secundária (+240 min), checada depois e declarada como tal:**
+
+| Recorte | n | líquido | IC 95% |
+|---|---|---|---|
+| Só as 10 moedas do recorder (lista fixada antes, sem viés de sobrevivência) | 94 | +173 | [+50, +299] |
+| Só as 20 extras (escolhidas pelo volume de hoje) | 199 | +118 | [+13, +213] |
+| 2024 | 232 | +125 | [−4, +229] |
+| 2025-01..09 | 61 | +177 | [+37, +358] |
+| Sem o melhor dia | 271 | +111 | [+10, +198] |
+| Sem os 3 melhores dias | 225 | +82 | [−19, +187] |
+| Sem os 5 melhores dias | 200 | +49 | [−49, +159] |
+
+**Carteira** (capital dividido igualmente entre as moedas que disparam no dia; limite superior, porque supõe
+100% do capital alocado):
+
+| | Dias com trade | média/dia | dias positivos | total | pior queda (maxDD) | pior dia |
+|---|---|---|---|---|---|---|
+| CONF +240 min | 91 em 21 meses | +108 bps | 64% | +166% | −15,8% | −8,3% |
+| EXPL +240 min | 76 em 12 meses | +81 bps | 61% | +86% | −23,8% | −12,4% |
+
+**Leitura honesta:**
+1. É o **primeiro sinal que passa num teste pré-registrado em dados nunca vistos**. Também se mantém na lista
+   fixa de moedas (o que descarta viés de sobrevivência) e nos dois anos.
+2. **É concentrado.** Tirando os 3 melhores dias, o IC passa a cruzar zero. O ganho vem das grandes
+   capitulações do mercado (ex.: 2024-01-03, 2024-03-05). Na prática é "comprar o pânico".
+3. **Margem para custo:** o médio aguenta ~0,7% a mais de slippage por lado; o limite inferior do IC só aguenta
+   ~0,14%. Numa cascata o spread abre, e esse é o risco real de execução. Um backtest com 1 min não vê isso.
+4. A janela de +60 min não funciona: o rebote precisa de horas.
+5. Diferente do G3: **não depende de latência**. Segundos de atraso não mudam nada (entrar em +5 min foi até
+   melhor).
+
+**Próximo passo:** confirmação ao vivo. Rodar um detector em **paper** (preço spot e OI públicos da Binance a
+cada minuto) que registra cada sinal e o resultado em +240 min. Pelo pré-registro, os dados depois de
+2026-10-15 são a segunda confirmação. Com ~4 dias de sinal por mês, ter n ≥ 30 dias leva ~6–8 meses.
+Nada de dinheiro real antes disso.
