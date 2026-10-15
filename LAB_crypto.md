@@ -378,3 +378,63 @@ Ressalvas baixas, registradas e não corrigidas:
 - o placebo não exclui janelas de evento (contaminação leve, que puxa o placebo *a favor* do evento; ou seja,
   conservador);
 - no G3, a saída é medida a partir de t0 e não de t0+L (diferença ≤ 15 s em 5 min, sem efeito no veredito).
+
+### G5: funding muito negativo → compra spot (2026-10-15), REPROVADO
+
+**Hipótese:** funding ≤ −0,05% = excesso de vendidos, e daí viria um short squeeze.
+
+**Regra pré-registrada:**
+- compra spot no 1º minuto depois da publicação do funding;
+- saída em +24 h (primária) ou +72 h (secundária);
+- sem trades sobrepostos (72 h de intervalo);
+- mesmas 30 moedas e mesmos custos do G4.
+
+| CONFIRMAÇÃO (n=152, 129 dias) | líquido | IC 95% | acerto | placebo |
+|---|---|---|---|---|
+| +1 min → +24 h | −31 bps | [−141, +78] | 44% | −61 |
+| +1 min → +72 h | −77 bps | [−200, +46] | 49% | −39 |
+
+Na EXPLORAÇÃO (n = 179): −70 bps em +24 h e +56 bps em +72 h, ambos com IC cruzando zero e indistinguíveis do placebo.
+**Sem efeito.** O funding negativo extremo não prevê alta no spot nessas moedas: o "squeeze" não aparece na média.
+
+### G6: filtro de meta-labeling, CANCELADO pela regra
+
+- O pré-registro exige ≥ 300 eventos.
+- O único sinal aprovado (G4) tem 293 eventos (91 dias independentes) na confirmação.
+- Um filtro treinado nisso teria ~90 observações efetivas, o que é sobreajuste garantido.
+- Volta a ser considerado quando a confirmação ao vivo do G4 somar os dados novos.
+
+### D3: WebSocket de anúncios da Binance, ADIADO (não vale pedir a chave agora)
+
+- O G3 mostrou que, num anúncio de listagem, **o preço anda no mesmo segundo e quem chega em ≥ 2 s paga o
+  pico**.
+- Um WebSocket da Binance entrega o anúncio sub-segundo, mas **para todo mundo ao mesmo tempo**, inclusive
+  para bots colocalizados em Tóquio.
+- Daqui o RTT até a Binance é ~0,27 s, então chegaríamos depois deles.
+- O prior mais forte do laboratório diz que não sobra nada.
+- Fica adiado até aparecer evidência de um tipo de anúncio da Binance com reação **lenta** (minutos).
+  Nesse caso a latência não importaria e a chave nem seria necessária.
+
+---
+
+## Resumo do laboratório (2026-10-15)
+
+| # | Resultado | O que significa |
+|---|---|---|
+| D1 | **SUCESSO** | Atraso de agendamento p95: 1,43 s (até 5 s) → **0,05 s**, de graça, confirmado ao vivo por horas |
+| G0 | PRONTO | Simulador pessimista testado |
+| G1 | **CORRIGIDO** | O classificador perdia ~28% das listagens; agora 60/60 e 30/30 numa amostra nova |
+| G2 | PRONTO | Histórico da Upbit desde 2023-09 (380 avisos) |
+| D2 | **MORTO** | O movimento acontece no 1º segundo; consultar mais rápido não paga, e a Upbit dá 429 perto de 1 req/s |
+| G3 | **REPROVADO** | Comprar na Binance depois da listagem na Upbit perde ~3% (n = 82); nem o teto otimista passa com ≥ 2 s |
+| G4 | **APROVADO (secundária)** | Comprar 1 min depois de uma cascata de liquidação e vender em +4 h: **+1,36%/trade**, IC [+0,28, +2,29], n = 293. Concentrado em grandes capitulações |
+| G5 | REPROVADO | Funding negativo não prevê alta |
+| G6 | CANCELADO | Eventos insuficientes |
+| D3 | ADIADO | O prior do G3 diz que velocidade de notícia não é o nosso jogo |
+
+**A conclusão principal:**
+- **O caminho de "chegar primeiro na notícia" está fechado para nós.** Quem ganha está a < 1 s.
+- **O único ganho testado vem de "comprar o pânico forçado" (G4).** Ele não depende de latência e funciona com
+  candles de 1 min e dados públicos gratuitos.
+- O próximo passo é a **confirmação ao vivo do G4** (mensal, com `--since 2026-10-15`), até somar ≥ 30 dias com
+  sinal. Só depois disso faz sentido pensar em paper trading com ordens reais na testnet.
