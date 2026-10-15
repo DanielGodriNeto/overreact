@@ -148,7 +148,14 @@ Com um timeout da Bybit no meio, o loop antigo atrasa todo mundo em +5 s.
 consultadas em < 0,3 s.
 
 **Ao vivo, logo após o deploy:** atraso p95 = upbit 0,050 s, okx 0,047 s, bybit 0,048 s. Meta < 0,3 s
-batida. Reconfiro com mais horas de dados no fim do laboratório.
+batida.
+
+**Rechecagem ao vivo (2026-10-15 00:13, ~8 h depois):**
+- p95 entre 0,043 e 0,058 s em todas as 9 fontes (upbit 0,047; okx 0,046; bybit 0,045);
+- zero falhas;
+- os 2 únicos 429 da Upbit no log caíram durante a minha paginação histórica (mesmo IP), não na operação normal.
+
+O ganho se mantém.
 
 **Ganho:** até ~1,4 s a menos (p95) em condições normais e até ~5 s quando outra fonte trava. Não é o bastante
 para a janela de 1–3 s da Upbit, mas é atraso de graça que saiu do caminho.
@@ -213,3 +220,65 @@ páginas. Ou seja: o limite da API é baixo e compartilhado por IP. Consultar a 
 - a categoria "유의 종목 지정" (aviso de risco da Upbit, possível evento negativo; precisaria de short).
 
 Testes: `test_news_type_g1_audit_cases`, `test_extract_g1_audit_cases`, `test_upbit_market_list_is_not_a_coin`.
+
+### G3 + D2: listagem na Upbit → compra spot na Binance (2026-10-15), REPROVADO / D2 MORTO
+
+**Dados:**
+- histórico completo da Upbit (380 avisos desde 2023-09; a paginação esperou 300 s a cada 429);
+- regras corrigidas do G1; eventos com par USDT ativo na Binance no momento;
+- mesma moeda dentro de 1 h conta uma vez.
+
+**Regra pré-registrada:**
+- compra no atraso L com o pior preço dos 2 candles de 1 s + 0,5% de slippage + 0,2% de taxas;
+- saída em +5 min (primária) ou +60 min (secundária);
+- teste: limite inferior do IC 95% bicaudal > 0 (equivale a unilateral com α = 0,025 = 0,05/k, k = 2).
+
+| CONFIRMAÇÃO 2024-01..2025-09 (n=82, 64 avisos) | líquido médio | IC 95% | acerto |
+|---|---|---|---|
+| L=1 s → +5 min | −322 bps | [−649, +41] | 24% |
+| L=3 s → +5 min | −341 bps | [−639, +28] | 22% |
+| L=5 s → +5 min | −349 bps | [−613, −8] | 23% |
+| L=1 s → +60 min (secundária) | −361 bps | [−801, +84] | 27% |
+| L=15 s → +5 min | −116 bps | [−392, +231] | 28% |
+| Consulta a cada 1 s (atraso simulado real) → +5 min | −299 bps | [−621, +68] | 23% |
+| Consulta a cada 10 s → +5 min | −292 bps | [−551, +46] | 21% |
+
+Na EXPLORAÇÃO (n = 49), tudo foi negativo e significativo: −580 bps em L = 1 s e −503 bps consultando a cada 10 s.
+**Veredito pré-registrado: REPROVADO**, sem nenhuma variante com limite inferior > 0.
+
+**Por que, de forma diagnóstica (exploração, não muda o veredito):**
+- Mediana do preço na Binance em relação ao segundo antes do carimbo:
+  - +0–2% em +1 s;
+  - **+13–16% em +5 s**;
+  - pico de ~+23% dentro de 5 min;
+  - ainda +11% em +5 min.
+- O dinheiro existe, mas está **todo no primeiro segundo**. Quem compra depois paga o pico, e o preço devolve
+  parte nos minutos seguintes (sobrerreação clássica).
+- Para checar se o prejuízo vinha só do modelo pessimista, calculei o **teto otimista**: compra no fechamento
+  do candle, zero slippage, só as taxas.
+
+| Teto otimista (+5 min) | CONFIRMAÇÃO | EXPLORAÇÃO |
+|---|---|---|
+| L=1 s | +648 bps [+233, +1229], **mediana +4** | −57 [−242, +134] |
+| L=2 s | +242 [−71, +651], mediana −15 | −166 [−379, +32] |
+| L=3 s | +121 [−174, +510], mediana −86 | −229 [−432, −33] |
+| L=5 s | +112 [−158, +491], mediana −153 | −192 [−399, +16] |
+
+- O verdadeiro fica entre o piso pessimista e o teto otimista.
+- O único teto positivo (L = 1 s, confirmação) vem de poucos casos gigantes; a mediana é ~0.
+- **Exige estar dentro de 1 s da publicação.** Nosso mínimo realista é ~1,5–3 s: cache de 0–1 s da Cloudflare
+  + 0,35 s de fetch + 0,27 s até a corretora, mais a espera até a próxima consulta.
+
+**Conclusões:**
+1. **G3 reprovado.** Comprar spot na Binance depois da listagem na Upbit não dá lucro com latência de
+   segundos. Nem no cenário otimista.
+2. **D2 morto.** Consultar mais rápido não ajuda:
+   - a curva do teto cai de L = 1 para L = 2 s;
+   - a Upbit dá 429 perto de 1 req/s;
+   - o movimento começa no próprio segundo do carimbo (calibração acima).
+   Ganhar aqui exigiria um feed sub-segundo (WebSocket/colocalização), que a Upbit não oferece de graça.
+3. **Refinamento com aggTrades (livro tick a tick) descartado.** Ele só estreitaria o intervalo entre piso e
+   teto, e o teto já não passa nas latências que conseguimos.
+4. **Hipótese nova, só exploração e NÃO testável no nosso cenário:** a reversão de +5 s para +5 min (cerca de
+   −3 a −5%) seria um short, e short/derivativos estão provavelmente vetados para o usuário no Brasil. Fica
+   registrada e não é perseguida.
